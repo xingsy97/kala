@@ -1,6 +1,6 @@
 import { readJsonFile, writeJsonFile } from '../persistence/atomic-json-file.js'
 
-export type LoginState = { codeVerifier: string; state: string; redirectUri: string; expiresAt: number; ssoConnectionId?: string }
+export type LoginState = { codeVerifier: string; state: string; oidcNonce?: string; redirectUri: string; expiresAt: number; ssoConnectionId?: string; organizationInviteHash?: string; ownerBootstrapHash?: string }
 export interface LoginStateStore { put(nonce: string, state: LoginState): Promise<void>; take(nonce: string): Promise<LoginState | undefined> }
 
 export class FileLoginStateStore implements LoginStateStore {

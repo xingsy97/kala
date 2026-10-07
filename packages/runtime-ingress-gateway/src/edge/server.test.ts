@@ -1,7 +1,7 @@
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MemoryRuntimeAssignmentStore } from '../assignments/store.js'
+import { inviteKey, MemoryRuntimeAssignmentStore, type AuthenticatedIdentity } from '../assignments/store.js'
 import type { LoginState, LoginStateStore } from '../auth/login-state-store.js'
 import { startRuntimeIngressGateway, type RuntimeIngressGateway } from './server.js'
 import { FileBrowserSessionStore } from '../auth/browser-session-store.js'
@@ -9,7 +9,7 @@ import { createSessionSecretBox } from '../auth/session-secret-box.js'
 import { MemoryEnterpriseSsoResolver } from '../auth/enterprise-sso.js'
 import { MemoryOrganizationStore, type OrganizationStore, type OrganizationStatus } from '../organizations/store.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
-import { ServiceAccountService } from '../api/service-accounts.js'
+import { ServiceAccountService, type ServiceAccountScope } from '../api/service-accounts.js'
 import type { SqlExecutor, SqlQueryResult } from '../persistence/postgres.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -22,10 +22,16 @@ class MemoryLoginStates implements LoginStateStore {
 }
 
 class TestOrganizationStore extends MemoryOrganizationStore {
+  readonly retentionUpdates: Array<{ organizationId: string; sessionDays: number; artifactDays: number; auditDays: number; deletedResourceGraceDays: number }> = []
+
   setStatus(organizationId: string, status: OrganizationStatus): void {
     const organization = this.organizations.get(organizationId)
     if (!organization) throw new Error('organization not found')
     this.organizations.set(organizationId, { ...organization, status })
+  }
+
+  async updateRetentionPolicy(organizationId: string, policy: { sessionDays: number; artifactDays: number; auditDays: number; deletedResourceGraceDays: number }): Promise<void> {
+    this.retentionUpdates.push({ organizationId, ...policy })
   }
 }
 
@@ -40,7 +46,10 @@ describe('Private Cloud edge request path', () => {
     expect(openApi.headers.get('x-request-id')).toEqual(expect.any(String))
     await expect(openApi.json()).resolves.toMatchObject({
       openapi: '3.1.0',
-      paths: { '/api/v1/service-accounts': expect.any(Object) },
+      paths: {
+        '/api/v1/service-accounts': expect.objectContaining({ get: expect.any(Object), post: expect.any(Object) }),
+        '/api/v1/service-accounts/{id}': expect.objectContaining({ delete: expect.any(Object) }),
+      },
     })
 
     const invalid = await fetch(`http://127.0.0.1:${gateway.port}/api/v1/openapi.json`, { method: 'POST' })
@@ -49,6 +58,150 @@ describe('Private Cloud edge request path', () => {
     await expect(invalid.json()).resolves.toMatchObject({
       error: { code: 'invalid_request', requestId: expect.any(String) },
     })
+  })
+
+  it('requires a tenant-bound invite instead of forwarding anonymous pairing to an arbitrary Runtime Unit', async () => {
+    const gateway = await createGateway('http://127.0.0.1:9')
+    for (const path of ['/auth/executor-pairings', '/auth/executor-pairings/example/claim']) {
+      const response = await fetch(`http://127.0.0.1:${gateway.port}${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      })
+      expect(response.status).toBe(409)
+      await expect(response.json()).resolves.toMatchObject({ error: 'executor_invite_required', message: expect.stringContaining('--invite') })
+    }
+  })
+
+  it('serves immutable installer assets anonymously without granting a Runtime Unit', async () => {
+    const requests: Array<{ url?: string; unit?: string }> = []
+    const upstream = createServer((request, response) => {
+      requests.push({ url: request.url, unit: request.headers['x-agent-runlab-runtime-unit'] as string | undefined })
+      response.writeHead(200, { 'content-type': 'text/x-shellscript' })
+      response.end('#!/bin/sh\n')
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const upstreamPort = typeof address === 'object' && address ? address.port : 0
+    running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
+    const gateway = await createGateway(`http://127.0.0.1:${upstreamPort}`)
+
+    const asset = await fetch(`http://127.0.0.1:${gateway.port}/install/assets/run.sh`)
+    expect(asset.status).toBe(200)
+    expect(await asset.text()).toBe('#!/bin/sh\n')
+    expect(requests).toEqual([{ url: '/install/assets/run.sh', unit: undefined }])
+    const assetWrite = await fetch(`http://127.0.0.1:${gateway.port}/install/assets/run.sh`, { method: 'POST' })
+    expect(assetWrite.status).toBe(401)
+    const session = await fetch(`http://127.0.0.1:${gateway.port}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    expect(session.status).toBe(401)
+    expect(requests).toHaveLength(1)
+  })
+
+  it('binds administrator-created Executor invites to one organization and rejects anonymous, member, and cross-origin creation', async () => {
+    const upstreamRequests: Array<{ unit?: string; organization?: string; role?: string; principal?: string }> = []
+    const upstream = createServer((request, response) => {
+      upstreamRequests.push({ unit: request.headers['x-agent-runlab-runtime-unit'] as string | undefined, organization: request.headers['x-agent-runlab-organization-id'] as string | undefined, role: request.headers['x-agent-runlab-organization-role'] as string | undefined, principal: request.headers['x-agent-runlab-principal'] as string | undefined })
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ id: 'inv_org_a', inviteToken: 'ak_invite_org_a' }))
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const upstreamPort = typeof address === 'object' && address ? address.port : 0
+    running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
+
+    const organizations = new TestOrganizationStore()
+    const access = await organizations.getOrCreateForIdentity({ issuer: 'http://identity.example', subject: 'alice' })
+    await organizations.addMember(access.organization.id, { issuer: 'http://identity.example', subject: 'bob' }, 'member')
+    const directory = new MemoryRuntimeAssignmentStore()
+    const ownerGateway = await createGateway(`http://127.0.0.1:${upstreamPort}`, undefined, { organizations, directory })
+    const ownerLogin = await fetch(`http://127.0.0.1:${ownerGateway.port}/auth/login`, { redirect: 'manual' })
+    const ownerNonce = cookieValue(ownerLogin.headers.getSetCookie(), 'ak_login')
+    const ownerCallback = await fetch(`http://127.0.0.1:${ownerGateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${ownerNonce}` }, redirect: 'manual' })
+    const ownerSession = cookieValue(ownerCallback.headers.getSetCookie(), 'ak_session')
+    const ownerOrigin = `http://127.0.0.1:${ownerGateway.port}`
+
+    const anonymous = await fetch(`${ownerOrigin}/auth/executor-invites`, { method: 'POST', headers: { 'content-type': 'application/json', origin: ownerOrigin }, body: '{}' })
+    expect(anonymous.status).toBe(401)
+    const crossOrigin = await fetch(`${ownerOrigin}/auth/executor-invites`, { method: 'POST', headers: { cookie: `ak_session=${ownerSession}`, 'content-type': 'application/json', origin: 'https://evil.example' }, body: '{}' })
+    expect(crossOrigin.status).toBe(403)
+    const created = await fetch(`${ownerOrigin}/auth/executor-invites`, { method: 'POST', headers: { cookie: `ak_session=${ownerSession}`, 'content-type': 'application/json', origin: ownerOrigin }, body: '{}' })
+    expect(created.status).toBe(200)
+    expect(await directory.findUnitByExecutorInvite('ak_invite_org_a')).toBe(access.organization.unitId)
+    expect(upstreamRequests).toEqual([{ unit: access.organization.unitId, organization: access.organization.id, role: 'owner', principal: Buffer.from('http://identity.example\0alice').toString('base64url') }])
+
+    const memberGateway = await createGateway(`http://127.0.0.1:${upstreamPort}`, undefined, { organizations, directory, callbackIdentity: () => ({ issuer: 'http://identity.example', subject: 'bob' }) })
+    const memberLogin = await fetch(`http://127.0.0.1:${memberGateway.port}/auth/login`, { redirect: 'manual' })
+    const memberNonce = cookieValue(memberLogin.headers.getSetCookie(), 'ak_login')
+    const memberCallback = await fetch(`http://127.0.0.1:${memberGateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${memberNonce}` }, redirect: 'manual' })
+    const memberSession = cookieValue(memberCallback.headers.getSetCookie(), 'ak_session')
+    const memberOrigin = `http://127.0.0.1:${memberGateway.port}`
+    const member = await fetch(`${memberOrigin}/auth/executor-invites`, { method: 'POST', headers: { cookie: `ak_session=${memberSession}`, 'content-type': 'application/json', origin: memberOrigin }, body: '{}' })
+    expect(member.status).toBe(403)
+    await expect(member.json()).resolves.toMatchObject({ error: 'forbidden', requiredPermission: 'workspace:manage' })
+    expect(upstreamRequests).toHaveLength(1)
+  })
+
+  it('creates copyable organization invites and accepts only the matching verified OIDC identity once', async () => {
+    const organizations = new TestOrganizationStore()
+    let callbackIdentity: AuthenticatedIdentity = { issuer: 'http://identity.example', subject: 'alice', displayName: 'Alice' }
+    const gateway = await createGateway('http://127.0.0.1:9', undefined, { organizations, callbackIdentity: () => callbackIdentity })
+    const endpoint = `http://127.0.0.1:${gateway.port}`
+    const ownerLogin = await fetch(`${endpoint}/auth/login`, { redirect: 'manual' })
+    const ownerNonce = cookieValue(ownerLogin.headers.getSetCookie(), 'ak_login')
+    const ownerCallback = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${ownerNonce}` }, redirect: 'manual' })
+    const ownerSession = cookieValue(ownerCallback.headers.getSetCookie(), 'ak_session')
+    const adminHeaders = { cookie: `ak_session=${ownerSession}`, origin: endpoint, 'x-kala-public-origin': endpoint, 'content-type': 'application/json' }
+
+    const legacy = await fetch(`${endpoint}/organization/members`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ issuer: 'guessed', subject: 'guessed', role: 'member' }) })
+    expect(legacy.status).toBe(405)
+    const createdResponse = await fetch(`${endpoint}/organization/invites`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ email: 'Invitee@Example.Test', role: 'admin', expiresInDays: 7 }) })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as { invite: { id: string; email: string }; inviteUrl: string }
+    expect(created.invite.email).toBe('invitee@example.test')
+    expect(created.inviteUrl).toMatch(new RegExp(`^${endpoint.replaceAll('.', '\\.')}/auth/login\\?invite=ak_org_invite_`))
+
+    const listed = await fetch(`${endpoint}/organization`, { headers: { cookie: `ak_session=${ownerSession}` } })
+    const listedText = await listed.text()
+    expect(listedText).toContain(created.invite.id)
+    expect(listedText).not.toContain(new URL(created.inviteUrl).searchParams.get('invite')!)
+
+    callbackIdentity = { issuer: 'http://identity.example', subject: 'real-invitee-sub', email: 'invitee@example.test', emailVerified: true }
+    const inviteLogin = await fetch(created.inviteUrl, { redirect: 'manual' })
+    const inviteNonce = cookieValue(inviteLogin.headers.getSetCookie(), 'ak_login')
+    const accepted = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${inviteNonce}` }, redirect: 'manual' })
+    expect(accepted.status).toBe(302)
+    expect(accepted.headers.get('location')).toBe('/auth/invite-result?status=accepted')
+    await expect(organizations.findAccess(callbackIdentity)).resolves.toMatchObject({ membership: { role: 'admin' } })
+
+    const replayLogin = await fetch(created.inviteUrl, { redirect: 'manual' })
+    const replayNonce = cookieValue(replayLogin.headers.getSetCookie(), 'ak_login')
+    const replay = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${replayNonce}` }, redirect: 'manual' })
+    expect(replay.status).toBe(403)
+    expect(await replay.text()).toContain('invalid, expired, revoked, or already used')
+  })
+
+  it('fails invitation acceptance when the IdP does not attest the email and supports tenant-bound revocation', async () => {
+    const organizations = new TestOrganizationStore()
+    let callbackIdentity: AuthenticatedIdentity = { issuer: 'http://identity.example', subject: 'alice' }
+    const gateway = await createGateway('http://127.0.0.1:9', undefined, { organizations, callbackIdentity: () => callbackIdentity })
+    const endpoint = `http://127.0.0.1:${gateway.port}`
+    const login = await fetch(`${endpoint}/auth/login`, { redirect: 'manual' })
+    const callback = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${cookieValue(login.headers.getSetCookie(), 'ak_login')}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const headers = { cookie: `ak_session=${session}`, origin: endpoint, 'x-kala-public-origin': endpoint, 'content-type': 'application/json' }
+    const createdResponse = await fetch(`${endpoint}/organization/invites`, { method: 'POST', headers, body: JSON.stringify({ email: 'invitee@example.test', role: 'member' }) })
+    const created = await createdResponse.json() as { invite: { id: string }; inviteUrl: string }
+
+    callbackIdentity = { issuer: 'http://identity.example', subject: 'invitee', email: 'invitee@example.test' }
+    const inviteLogin = await fetch(created.inviteUrl, { redirect: 'manual' })
+    const denied = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${cookieValue(inviteLogin.headers.getSetCookie(), 'ak_login')}` }, redirect: 'manual' })
+    expect(denied.status).toBe(403)
+    expect(await denied.text()).toContain('did not attest that your email is verified')
+
+    const revoked = await fetch(`${endpoint}/organization/invites/${created.invite.id}`, { method: 'DELETE', headers })
+    expect(revoked.status).toBe(204)
+    callbackIdentity = { ...callbackIdentity, emailVerified: true }
+    const revokedLogin = await fetch(created.inviteUrl, { redirect: 'manual' })
+    const revokedCallback = await fetch(`${endpoint}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${cookieValue(revokedLogin.headers.getSetCookie(), 'ak_login')}` }, redirect: 'manual' })
+    expect(revokedCallback.status).toBe(403)
   })
 
   it('authenticates scoped service accounts and injects one Runtime Unit authority', async () => {
@@ -89,6 +242,83 @@ describe('Private Cloud edge request path', () => {
     expect(denied.status).toBe(403)
     await expect(denied.json()).resolves.toMatchObject({ error: { code: 'forbidden', requestId: expect.any(String) } })
     expect(upstreamRequests).toHaveLength(1)
+  })
+
+  it('manages finite Service Account lifecycles within the browser administrator organization', async () => {
+    const organizations = new TestOrganizationStore()
+    const database = new LifecycleServiceAccountDatabase()
+    const serviceAccounts = new ServiceAccountService(database)
+    const other = await serviceAccounts.create({ organizationId: 'org_other', name: 'other automation', scopes: ['workspace:read'] })
+    const gateway = await createGateway('http://127.0.0.1:9', undefined, { organizations, serviceAccounts })
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const access = await organizations.findAccess({ issuer: 'http://identity.example', subject: 'alice' })
+    const endpoint = `http://127.0.0.1:${gateway.port}`
+    const browserHeaders = { cookie: `ak_session=${session}`, origin: endpoint, 'content-type': 'application/json' }
+
+    const invalidExpiration = await fetch(`${endpoint}/api/v1/service-accounts`, {
+      method: 'POST', headers: browserHeaders, body: JSON.stringify({ name: 'invalid', scopes: ['workspace:read'], expiresAt: 123 }),
+    })
+    expect(invalidExpiration.status).toBe(400)
+
+    const createdResponse = await fetch(`${endpoint}/api/v1/service-accounts`, {
+      method: 'POST', headers: browserHeaders, body: JSON.stringify({ name: 'deploy automation', scopes: ['workspace:read'] }),
+    })
+    expect(createdResponse.status).toBe(201)
+    const created = await createdResponse.json() as { id: string; token: string; name: string; scopes: string[]; createdAt: string; expiresAt: string; revokedAt: null }
+    expect(created).toMatchObject({
+      id: expect.stringMatching(/^prn_/u),
+      token: expect.stringMatching(/^ak_sa_/u),
+      name: 'deploy automation',
+      scopes: ['workspace:read'],
+      createdAt: expect.any(String),
+      expiresAt: expect.any(String),
+      revokedAt: null,
+    })
+    expect(Date.parse(created.expiresAt)).toBeGreaterThan(Date.parse(created.createdAt))
+
+    const bearerManagement = await fetch(`${endpoint}/api/v1/service-accounts`, {
+      headers: { cookie: `ak_session=${session}`, authorization: `Bearer ${created.token}` },
+    })
+    expect(bearerManagement.status).toBe(401)
+
+    const listed = await fetch(`${endpoint}/api/v1/service-accounts`, { headers: { cookie: `ak_session=${session}` } })
+    expect(listed.status).toBe(200)
+    const listedBody = await listed.json() as { items: Array<Record<string, unknown>> }
+    expect(listedBody.items).toEqual([{
+      id: created.id,
+      name: 'deploy automation',
+      scopes: ['workspace:read'],
+      createdAt: created.createdAt,
+      expiresAt: created.expiresAt,
+      revokedAt: null,
+    }])
+    expect(JSON.stringify(listedBody)).not.toContain(created.token)
+    expect(JSON.stringify(listedBody)).not.toMatch(/tokenHash|token_hash/iu)
+    expect(database.lastListedOrganizationId).toBe(access!.organization.id)
+
+    const crossTenant = await fetch(`${endpoint}/api/v1/service-accounts/${other.id}`, { method: 'DELETE', headers: browserHeaders })
+    expect(crossTenant.status).toBe(404)
+    await expect(serviceAccounts.authenticate(other.token)).resolves.toBeDefined()
+
+    const crossOrigin = await fetch(`${endpoint}/api/v1/service-accounts/${created.id}`, {
+      method: 'DELETE', headers: { cookie: `ak_session=${session}`, origin: 'https://evil.example' },
+    })
+    expect(crossOrigin.status).toBe(403)
+    await expect(serviceAccounts.authenticate(created.token)).resolves.toBeDefined()
+
+    const revoked = await fetch(`${endpoint}/api/v1/service-accounts/${created.id}`, { method: 'DELETE', headers: browserHeaders })
+    expect(revoked.status).toBe(204)
+    const denied = await fetch(`${endpoint}/api/v1/sessions`, { headers: { authorization: `Bearer ${created.token}` } })
+    expect(denied.status).toBe(401)
+    await expect(denied.json()).resolves.toMatchObject({ error: { code: 'authentication_required' } })
+
+    database.failure = new Error('postgres connection secret')
+    const failedList = await fetch(`${endpoint}/api/v1/service-accounts`, { headers: { cookie: `ak_session=${session}` } })
+    expect(failedList.status).toBe(500)
+    expect(await failedList.text()).not.toContain('postgres connection secret')
   })
 
   it('returns the versioned error envelope for Product API rate limits', async () => {
@@ -195,6 +425,113 @@ describe('Private Cloud edge request path', () => {
 
     const replay = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=replay`, { headers: { cookie: `ak_login=${loginCookie}` } })
     expect(replay.status).toBe(400)
+  })
+
+  it('overwrites forged WebSocket actor headers, rejects read-only upgrades, and strips actor headers from executor enrollment', async () => {
+    const upgrades: Array<Record<string, string | string[] | undefined>> = []
+    const upstream = createServer()
+    upstream.on('upgrade', (request, socket) => {
+      upgrades.push(request.headers)
+      socket.end('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n')
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve))
+    const address = upstream.address()
+    const upstreamPort = typeof address === 'object' && address ? address.port : 0
+    running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
+
+    const organizations = new TestOrganizationStore()
+    const owner = await organizations.getOrCreateForIdentity({ issuer: 'http://identity.example', subject: 'owner' })
+    const alice = { issuer: 'http://identity.example', subject: 'alice' }
+    await organizations.addMember(owner.organization.id, alice, 'member')
+    const directory = new MemoryRuntimeAssignmentStore()
+    await directory.bindExecutorInvite('executor-invite', 'tenant_executor')
+    const gateway = await createGateway(`http://127.0.0.1:${upstreamPort}`, undefined, { organizations, directory })
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const forgedActor = {
+      'x-agent-runlab-organization-id': 'org_attacker',
+      'x-agent-runlab-organization-role': 'owner',
+      'x-agent-runlab-principal': 'principal_attacker',
+    }
+
+    await openWebSocket(gateway.port, { cookie: `ak_session=${session}`, 'x-kala-executor-invite': 'executor-invite', ...forgedActor })
+    expect(upgrades[0]).toMatchObject({
+      'x-agent-runlab-runtime-unit': owner.organization.unitId,
+      'x-agent-runlab-ingress-secret': 'gateway-secret',
+      'x-agent-runlab-organization-id': owner.organization.id,
+      'x-agent-runlab-organization-role': 'member',
+      'x-agent-runlab-principal': Buffer.from('http://identity.example\0alice', 'utf8').toString('base64url'),
+    })
+    expect(upgrades[0]?.cookie).toBeUndefined()
+    expect(upgrades[0]?.authorization).toBeUndefined()
+    expect(upgrades[0]?.['x-kala-executor-invite']).toBeUndefined()
+
+    await organizations.updateMemberRole(owner.organization.id, alice, 'viewer')
+    await expect(openWebSocket(gateway.port, { cookie: `ak_session=${session}`, 'x-kala-executor-invite': 'executor-invite', ...forgedActor })).rejects.toThrow()
+    expect(upgrades).toHaveLength(1)
+
+    await openWebSocket(gateway.port, { 'x-kala-executor-invite': 'executor-invite', ...forgedActor })
+    expect(upgrades[1]).toMatchObject({
+      'x-agent-runlab-runtime-unit': 'tenant_executor',
+      'x-agent-runlab-ingress-secret': 'gateway-secret',
+    })
+    expect(upgrades[1]?.['x-agent-runlab-organization-id']).toBeUndefined()
+    expect(upgrades[1]?.['x-agent-runlab-organization-role']).toBeUndefined()
+    expect(upgrades[1]?.['x-agent-runlab-principal']).toBeUndefined()
+
+    await openWebSocket(gateway.port, { 'x-kala-executor-route': inviteKey('executor-invite'), ...forgedActor })
+    expect(upgrades[2]).toMatchObject({ 'x-agent-runlab-runtime-unit': 'tenant_executor', 'x-agent-runlab-ingress-secret': 'gateway-secret' })
+    expect(upgrades[2]?.['x-kala-executor-route']).toBeUndefined()
+    expect(upgrades[2]?.['x-agent-runlab-organization-id']).toBeUndefined()
+    await expect(openWebSocket(gateway.port, { 'x-kala-executor-route': inviteKey('unbound-invite') })).rejects.toThrow()
+    expect(upgrades).toHaveLength(3)
+  })
+
+  it('requires same-origin browser organization writes while preserving origin-less clients', async () => {
+    const organizations = new TestOrganizationStore()
+    const gateway = await createGateway('http://127.0.0.1:9', undefined, { organizations })
+    const login = await fetch(`http://127.0.0.1:${gateway.port}/auth/login`, { redirect: 'manual' })
+    const nonce = cookieValue(login.headers.getSetCookie(), 'ak_login')
+    const callback = await fetch(`http://127.0.0.1:${gateway.port}/auth/callback?code=ok`, { headers: { cookie: `ak_login=${nonce}` }, redirect: 'manual' })
+    const session = cookieValue(callback.headers.getSetCookie(), 'ak_session')
+    const access = await organizations.findAccess({ issuer: 'http://identity.example', subject: 'alice' })
+    const bob = { issuer: 'http://identity.example', subject: 'bob' }
+    await organizations.addMember(access!.organization.id, bob, 'admin')
+    const endpoint = `http://127.0.0.1:${gateway.port}`
+    const crossOriginHeaders = { cookie: `ak_session=${session}`, origin: 'https://evil.example', 'content-type': 'application/json' }
+
+    const crossOrigin = await Promise.all([
+      fetch(`${endpoint}/organization/retention`, { method: 'PUT', headers: crossOriginHeaders, body: JSON.stringify({ sessionDays: 1, artifactDays: 2, auditDays: 3, deletedResourceGraceDays: 4 }) }),
+      fetch(`${endpoint}/organization/invites`, { method: 'POST', headers: crossOriginHeaders, body: JSON.stringify({ email: 'intruder@example.test', role: 'admin' }) }),
+      fetch(`${endpoint}/organization/ownership`, { method: 'POST', headers: crossOriginHeaders, body: JSON.stringify(bob) }),
+    ])
+    expect(crossOrigin.map((response) => response.status)).toEqual([403, 403, 403])
+    expect(organizations.retentionUpdates).toHaveLength(0)
+    expect(await organizations.findAccess({ issuer: 'http://identity.example', subject: 'intruder' })).toBeUndefined()
+    expect((await organizations.findAccess({ issuer: 'http://identity.example', subject: 'alice' }))?.membership.role).toBe('owner')
+
+    const sameOriginHeaders = { cookie: `ak_session=${session}`, origin: endpoint, 'content-type': 'application/json' }
+    expect((await fetch(`${endpoint}/organization/retention`, { method: 'PUT', headers: sameOriginHeaders, body: JSON.stringify({ sessionDays: 10, artifactDays: 20, auditDays: 30, deletedResourceGraceDays: 40 }) })).status).toBe(204)
+    expect((await fetch(`${endpoint}/organization/invites`, { method: 'POST', headers: sameOriginHeaders, body: JSON.stringify({ email: 'charlie@example.test', role: 'member' }) })).status).toBe(201)
+    expect(organizations.retentionUpdates).toHaveLength(1)
+    vi.spyOn(organizations, 'updateRetentionPolicy').mockRejectedValueOnce(new Error('unsupported_retention_fields:artifactDays,auditDays'))
+    const unsupported = await fetch(`${endpoint}/organization/retention`, { method: 'PUT', headers: sameOriginHeaders, body: JSON.stringify({ sessionDays: 10, artifactDays: 7, auditDays: 30, deletedResourceGraceDays: 40 }) })
+    expect(unsupported.status).toBe(400)
+    await expect(unsupported.json()).resolves.toMatchObject({ error: 'unsupported_retention_fields', unsupportedFields: ['artifactDays', 'auditDays'] })
+
+    await organizations.addMember(access!.organization.id, { issuer: 'http://identity.example', subject: 'charlie' }, 'member')
+    const originLess = await fetch(`${endpoint}/organization/members`, {
+      method: 'PATCH',
+      headers: { cookie: `ak_session=${session}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ issuer: 'http://identity.example', subject: 'charlie', role: 'viewer' }),
+    })
+    expect(originLess.status).toBe(204)
+    expect((await organizations.findAccess({ issuer: 'http://identity.example', subject: 'charlie' }))?.membership.role).toBe('viewer')
+
+    expect((await fetch(`${endpoint}/organization/ownership`, { method: 'POST', headers: sameOriginHeaders, body: JSON.stringify(bob) })).status).toBe(204)
+    expect((await organizations.findAccess(bob))?.membership.role).toBe('owner')
   })
 
   it('serves authenticated Dashboard assets from the independent Dashboard service while APIs stay on Runtime', async () => {
@@ -350,11 +687,12 @@ async function createGateway(
   auth?: {
     enterpriseSso?: MemoryEnterpriseSsoResolver
     authorizationOptions?: Array<{ idpHint?: string; loginHint?: string }>
-    callbackIdentity?(): { issuer: string; subject: string; upstreamProviderId?: string }
+    callbackIdentity?(): AuthenticatedIdentity
     dashboardOrigin?: string
     organizations?: OrganizationStore
     rateLimiter?: SlidingWindowRateLimiter
     serviceAccounts?: ServiceAccountService
+    directory?: MemoryRuntimeAssignmentStore
   },
 ): Promise<RuntimeIngressGateway> {
   const dir = mkdtempSync(join(tmpdir(), 'gateway-sessions-'))
@@ -373,7 +711,7 @@ async function createGateway(
     ...(auth?.organizations ? { organizations: auth.organizations } : {}),
     ...(auth?.rateLimiter ? { rateLimiter: auth.rateLimiter } : {}),
     ...(auth?.serviceAccounts ? { serviceAccounts: auth.serviceAccounts } : {}),
-    directory: new MemoryRuntimeAssignmentStore(),
+    directory: auth?.directory ?? new MemoryRuntimeAssignmentStore(),
     loginStates: new MemoryLoginStates(),
     ...(auth?.enterpriseSso ? { enterpriseSso: auth.enterpriseSso } : {}),
     oidc: {
@@ -395,6 +733,80 @@ async function createGateway(
   return gateway
 }
 
+class LifecycleServiceAccountDatabase implements SqlExecutor {
+  readonly principals = new Map<string, string>()
+  readonly tokens: Array<{
+    organizationId: string
+    principalId: string
+    tokenHash: string
+    scopes: ServiceAccountScope[]
+    createdAt: Date
+    expiresAt: Date | null
+    revokedAt: Date | null
+  }> = []
+  lastListedOrganizationId?: string
+  failure?: Error
+
+  async query<Row extends Record<string, unknown> = Record<string, unknown>>(text: string, values: readonly unknown[] = []): Promise<SqlQueryResult<Row>> {
+    if (this.failure) throw this.failure
+    const sql = text.trim().replace(/\s+/gu, ' ')
+    if (sql.startsWith('SELECT COUNT(*)')) {
+      const organizationId = values[0] as string
+      const count = this.tokens.filter((token) => token.organizationId === organizationId && token.revokedAt === null && (token.expiresAt === null || token.expiresAt.getTime() > Date.now())).length
+      return sqlResult([{ count: String(count) } as unknown as Row])
+    }
+    if (sql.startsWith('INSERT INTO principals')) {
+      this.principals.set(values[0] as string, values[1] as string)
+      return sqlResult([], 1)
+    }
+    if (sql.startsWith('INSERT INTO service_account_tokens')) {
+      this.tokens.push({
+        organizationId: values[1] as string,
+        principalId: values[2] as string,
+        tokenHash: values[3] as string,
+        scopes: values[4] as ServiceAccountScope[],
+        createdAt: values[5] as Date,
+        expiresAt: values[6] as Date | null,
+        revokedAt: null,
+      })
+      return sqlResult([], 1)
+    }
+    if (sql.startsWith('SELECT tokens.principal_id AS id')) {
+      const organizationId = values[0] as string
+      this.lastListedOrganizationId = organizationId
+      return sqlResult(this.tokens
+        .filter((token) => token.organizationId === organizationId)
+        .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+        .map((token) => ({
+          id: token.principalId,
+          name: this.principals.get(token.principalId) ?? '',
+          scopes: token.scopes,
+          created_at: token.createdAt,
+          expires_at: token.expiresAt,
+          revoked_at: token.revokedAt,
+        }) as unknown as Row))
+    }
+    if (sql.startsWith('UPDATE service_account_tokens')) {
+      const token = this.tokens.find((candidate) => candidate.organizationId === values[0] && candidate.principalId === values[1] && candidate.revokedAt === null)
+      if (!token) return sqlResult([], 0)
+      token.revokedAt = new Date()
+      return sqlResult([], 1)
+    }
+    if (sql.startsWith('SELECT tokens.principal_id')) {
+      const token = this.tokens.find((candidate) => candidate.tokenHash === values[0] && candidate.revokedAt === null && (candidate.expiresAt === null || candidate.expiresAt.getTime() > Date.now()))
+      if (!token) return sqlResult([])
+      return sqlResult([{
+        principal_id: token.principalId,
+        organization_id: token.organizationId,
+        runtime_unit_id: `tenant_${token.organizationId}`,
+        organization_status: 'active',
+        scopes: token.scopes,
+      } as unknown as Row])
+    }
+    return sqlResult([])
+  }
+}
+
 class ServiceAccountAuthDatabase implements SqlExecutor {
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(): Promise<SqlQueryResult<Row>> {
     return {
@@ -411,6 +823,25 @@ class ServiceAccountAuthDatabase implements SqlExecutor {
       fields: [],
     }
   }
+}
+
+function sqlResult<Row extends Record<string, unknown>>(rows: Row[], rowCount = rows.length): SqlQueryResult<Row> {
+  return { rows, rowCount, command: '', oid: 0, fields: [] }
+}
+
+function openWebSocket(port: number, headers: Record<string, string>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: '127.0.0.1',
+      port,
+      path: '/socket.io/?EIO=4&transport=websocket',
+      headers: { connection: 'Upgrade', upgrade: 'websocket', ...headers },
+    })
+    request.once('upgrade', (_response, socket) => { socket.destroy(); resolve() })
+    request.once('response', (response) => { response.resume(); reject(new Error(`upgrade rejected with HTTP ${response.statusCode ?? 0}`)) })
+    request.once('error', reject)
+    request.end()
+  })
 }
 
 function cookieValue(headers: readonly string[], name: string): string {

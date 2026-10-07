@@ -34,6 +34,26 @@ describe('OrganizationProvisioningService', () => {
     expect(database.statements('INSERT INTO outbox_events')).toHaveLength(1)
   })
 
+  it('rejects provisioning a second organization for an active owner identity', async () => {
+    const database = new FakeProvisioningDatabase(new Set(), 'org_existing')
+    const service = new OrganizationProvisioningService(database)
+
+    await expect(service.provision({
+      operationId: 'op-conflict',
+      name: 'Other organization',
+      owner: { issuer: 'https://id.example', subject: 'alice' },
+      contractReference: 'contract-other',
+      supportTier: 'business',
+      startsAt: new Date('2026-01-01T00:00:00Z'),
+      endsAt: new Date('2027-01-01T00:00:00Z'),
+      seatLimit: 10,
+      concurrentSessionLimit: 3,
+    })).rejects.toThrow('identity_already_belongs_to_another_organization')
+
+    expect(database.statements('INSERT INTO organizations')).toEqual([])
+    expect(database.statements('SELECT pg_advisory_xact_lock')).toHaveLength(1)
+  })
+
   it('maps lifecycle status changes to runtime placement and revokes live sessions', async () => {
     const database = new FakeProvisioningDatabase()
     const service = new OrganizationProvisioningService(database)
@@ -98,7 +118,10 @@ describe('OrganizationProvisioningService', () => {
 
 class FakeProvisioningDatabase implements ControlPlaneDatabase, SqlExecutor {
   readonly executed: Array<{ sql: string; values: readonly unknown[] }> = []
-  constructor(private readonly appliedOperations = new Set<string>()) {}
+  constructor(
+    private readonly appliedOperations = new Set<string>(),
+    private readonly activeOrganizationId?: string,
+  ) {}
 
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(text: string, values: readonly unknown[] = []): Promise<SqlQueryResult<Row>> {
     const sql = text.trim().replace(/\s+/gu, ' ')
@@ -108,6 +131,9 @@ class FakeProvisioningDatabase implements ControlPlaneDatabase, SqlExecutor {
       return this.appliedOperations.has(operationId)
         ? result([{ aggregate_id: 'org_acme', runtime_unit_id: 'tenant_acme' } as unknown as Row])
         : result([])
+    }
+    if (sql.startsWith('SELECT m.organization_id FROM organization_memberships')) {
+      return this.activeOrganizationId ? result([{ organization_id: this.activeOrganizationId } as unknown as Row]) : result([])
     }
     if (sql.startsWith('UPDATE organizations SET status=')) return result([], 1)
     return result([])

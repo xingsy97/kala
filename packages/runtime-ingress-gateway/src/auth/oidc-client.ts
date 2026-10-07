@@ -5,8 +5,8 @@ import type { AuthenticatedIdentity } from '../assignments/store.js'
 export type OidcAuthentication = { identity: AuthenticatedIdentity; refreshToken?: string; accessTokenExpiresAt?: number }
 export type OidcRefreshResult = { refreshToken?: string; accessTokenExpiresAt?: number }
 export type OidcClient = {
-  authorizationUrl(redirectUri: string, options?: { prompt?: 'login'; loginHint?: string; idpHint?: string }): Promise<{ url: URL; codeVerifier: string; state: string }>
-  callback(currentUrl: URL, redirectUri: string, codeVerifier: string, state: string): Promise<OidcAuthentication>
+  authorizationUrl(redirectUri: string, options?: { prompt?: 'login'; loginHint?: string; idpHint?: string; nonce?: string }): Promise<{ url: URL; codeVerifier: string; state: string }>
+  callback(currentUrl: URL, redirectUri: string, codeVerifier: string, state: string, nonce?: string): Promise<OidcAuthentication>
   refresh(refreshToken: string): Promise<OidcRefreshResult>
   revokeRefreshToken(refreshToken: string): Promise<void>
 }
@@ -42,6 +42,7 @@ export async function createOidcClient(options: {
         code_challenge: codeChallenge,
         code_challenge_method: 'S256',
         state,
+        ...(authorizationOptions?.nonce ? { nonce: authorizationOptions.nonce } : {}),
         ...(authorizationOptions?.prompt ? { prompt: authorizationOptions.prompt } : {}),
         ...(authorizationOptions?.loginHint ? { login_hint: authorizationOptions.loginHint } : {}),
         // ZITADEL owns federation. The gateway supplies only a server-resolved
@@ -50,8 +51,8 @@ export async function createOidcClient(options: {
       })
       return { url, codeVerifier, state }
     },
-    async callback(currentUrl, redirectUri, codeVerifier, state) {
-      const tokens = await oidc.authorizationCodeGrant(config, currentUrl, { pkceCodeVerifier: codeVerifier, expectedState: state })
+    async callback(currentUrl, redirectUri, codeVerifier, state, nonce) {
+      const tokens = await oidc.authorizationCodeGrant(config, currentUrl, { pkceCodeVerifier: codeVerifier, expectedState: state, ...(nonce ? { expectedNonce: nonce } : {}) })
       const claims = tokens.claims()
       if (!claims?.sub) throw new Error('OIDC response is missing subject')
       const accessToken = tokens.access_token
@@ -65,8 +66,7 @@ export async function createOidcClient(options: {
           : typeof userInfo?.preferred_username === 'string' && userInfo.preferred_username.trim() ? userInfo.preferred_username.trim()
             : typeof claims.preferred_username === 'string' && claims.preferred_username.trim() ? claims.preferred_username.trim()
               : undefined
-      const email = typeof userInfo?.email === 'string' && userInfo.email.trim() ? userInfo.email.trim()
-        : typeof claims.email === 'string' && claims.email.trim() ? claims.email.trim() : undefined
+      const verifiedEmail = selectVerifiedEmail(claims, userInfo)
       const upstreamProviderId = trustedStringClaim(claims, userInfo, [
         'urn:zitadel:iam:user:metadata:idp_id',
         'urn:zitadel:iam:user:metadata:idpId',
@@ -77,7 +77,7 @@ export async function createOidcClient(options: {
           issuer: options.issuer.href.replace(/\/$/u, ''),
           subject: claims.sub,
           ...(displayName ? { displayName } : {}),
-          ...(email ? { email } : {}),
+          ...(verifiedEmail ? { email: verifiedEmail.email, emailVerified: verifiedEmail.verified } : {}),
           ...(upstreamProviderId ? { upstreamProviderId } : {}),
         },
         ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
@@ -95,6 +95,19 @@ export async function createOidcClient(options: {
       await oidc.tokenRevocation(config, refreshToken, { token_type_hint: 'refresh_token' })
     },
   }
+}
+
+export function selectVerifiedEmail(
+  claims: Record<string, unknown>,
+  userInfo: Record<string, unknown> | undefined,
+): { email: string; verified: boolean } | undefined {
+  if (typeof userInfo?.email === 'string' && userInfo.email.trim()) {
+    return { email: userInfo.email.trim(), verified: userInfo.email_verified === true }
+  }
+  if (typeof claims.email === 'string' && claims.email.trim()) {
+    return { email: claims.email.trim(), verified: claims.email_verified === true }
+  }
+  return undefined
 }
 
 function trustedStringClaim(

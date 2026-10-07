@@ -5,6 +5,8 @@ export type AuthenticatedIdentity = {
   readonly subject: string
   readonly displayName?: string
   readonly email?: string
+  /** True only when the OIDC provider explicitly attested that `email` is verified. */
+  readonly emailVerified?: boolean
   /** Opaque upstream enterprise IdP identifier asserted by the trusted identity broker. */
   readonly upstreamProviderId?: string
 }
@@ -19,6 +21,7 @@ export interface RuntimeAssignmentStore {
   findByIdentity(identity: AuthenticatedIdentity): Promise<RuntimeAssignment | undefined>
   bindExecutorInvite(inviteToken: string, unitId: string): Promise<void>
   findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined>
+  findUnitByExecutorRouteHint(inviteHash: string): Promise<string | undefined>
 }
 
 /** Deterministic one-user/one-runtime assignment store for the first Private Cloud release. */
@@ -45,7 +48,11 @@ export class MemoryRuntimeAssignmentStore implements RuntimeAssignmentStore {
   }
 
   async findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined> {
-    return this.executorInviteUnits.get(inviteKey(inviteToken))
+    return this.findUnitByExecutorRouteHint(inviteKey(inviteToken))
+  }
+
+  async findUnitByExecutorRouteHint(inviteHash: string): Promise<string | undefined> {
+    return this.executorInviteUnits.get(inviteHash)
   }
 }
 

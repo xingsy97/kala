@@ -25,16 +25,25 @@ export class OrganizationProvisioningService {
 
   async provision(input: ProvisionOrganizationInput): Promise<{ organizationId: string; runtimeUnitId: string; alreadyApplied: boolean }> {
     validateProvisioning(input)
-    return this.database.transaction(async (transaction) => {
+    return this.database.transaction((transaction) => this.provisionInTransaction(transaction, input))
+  }
+
+  async provisionInTransaction(transaction: SqlExecutor, input: ProvisionOrganizationInput): Promise<{ organizationId: string; runtimeUnitId: string; alreadyApplied: boolean }> {
+      validateProvisioning(input)
       const prior = await findOperation(transaction, input.operationId)
       if (prior) return { organizationId: prior.aggregate_id, runtimeUnitId: prior.runtime_unit_id, alreadyApplied: true }
       const organizationId = newId('org')
       const runtimeUnitId = newId('tenant')
       const ownerId = principalId(input.owner)
       const poolId = newId('pool')
+      await transaction.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [ownerId])
       await transaction.query(`INSERT INTO principals(id,kind,issuer,subject,display_name,email)
         VALUES($1,'human',$2,$3,$4,$5) ON CONFLICT (issuer,subject) DO UPDATE SET display_name=EXCLUDED.display_name,email=EXCLUDED.email`,
       [ownerId, input.owner.issuer, input.owner.subject, input.owner.displayName ?? null, input.owner.email ?? null])
+      const activeMemberships = await transaction.query<{ organization_id: string }>(`SELECT m.organization_id FROM organization_memberships m
+        JOIN principals p ON p.id=m.principal_id WHERE p.issuer=$1 AND p.subject=$2 AND m.status='active'
+        ORDER BY m.organization_id LIMIT 2 FOR UPDATE OF m`, [input.owner.issuer, input.owner.subject])
+      if (activeMemberships.rows.length > 0) throw new Error('identity_already_belongs_to_another_organization')
       await transaction.query(`INSERT INTO organizations(id,name,status,runtime_unit_id) VALUES($1,$2,'provisioning',$3)`, [organizationId, input.name.trim(), runtimeUnitId])
       await transaction.query(`INSERT INTO organization_memberships(organization_id,principal_id,role,status) VALUES($1,(SELECT id FROM principals WHERE issuer=$2 AND subject=$3),'owner','active')`, [organizationId, input.owner.issuer, input.owner.subject])
       await transaction.query(`INSERT INTO contract_entitlements(organization_id,contract_reference,support_tier,starts_at,ends_at,grace_ends_at,seat_limit,concurrent_session_limit,workspace_limit,monthly_token_limit,storage_bytes_limit)
@@ -45,7 +54,6 @@ export class OrganizationProvisioningService {
       await transaction.query(`UPDATE organizations SET status='active',updated_at=now() WHERE id=$1`, [organizationId])
       await appendControlEvent(transaction, input.operationId, organizationId, ownerId, 'organization.provisioned', { contractReference: input.contractReference })
       return { organizationId, runtimeUnitId, alreadyApplied: false }
-    })
   }
 
   async setStatus(input: {

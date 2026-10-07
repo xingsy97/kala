@@ -7,14 +7,15 @@ import { parsePublicUrls, validatePublicRequest, type PublicUrlPattern } from '@
 
 import type { LoginStateStore } from '../auth/login-state-store.js'
 import type { OidcClient } from '../auth/oidc-client.js'
-import type { AuthenticatedIdentity, RuntimeAssignmentStore } from '../assignments/store.js'
+import { inviteKey, type AuthenticatedIdentity, type RuntimeAssignmentStore } from '../assignments/store.js'
 import { permits, type OrganizationStore } from '../organizations/store.js'
 import { browserDeviceFromUserAgent, browserSessionTokenHash, isLive, type BrowserSession, type BrowserSessionStore } from '../auth/browser-session-store.js'
 import type { SessionSecretBox } from '../auth/session-secret-box.js'
 import type { EnterpriseSsoResolver } from '../auth/enterprise-sso.js'
-import type { ServiceAccountService, ServiceAccountScope } from '../api/service-accounts.js'
+import { ServiceAccountInputError, type ServiceAccountService, type ServiceAccountScope } from '../api/service-accounts.js'
 import { enterpriseManagementOpenApi } from '../api/openapi.js'
 import type { RateLimiter } from '../governance/rate-limit.js'
+import { isOwnerBootstrapToken, ownerBootstrapHash, type OwnerBootstrapGateway } from '../organizations/owner-bootstrap.js'
 
 export type RuntimeIngressGateway = { readonly http: HttpServer; readonly port: number; close(): Promise<void> }
 
@@ -32,7 +33,7 @@ function isDocumentNavigation(request: IncomingMessage): boolean {
 }
 
 function isPublicInstallerPath(pathname: string): boolean {
-  return pathname === '/install' || pathname === '/install.ps1' || pathname.startsWith('/release-assets/')
+  return pathname === '/install' || pathname === '/install.ps1' || pathname.startsWith('/install/assets/') || pathname.startsWith('/release-assets/')
 }
 
 const DASHBOARD_API_EXACT = new Set(['/models', '/settings', '/memo', '/metrics', '/organization', '/install', '/install.ps1'])
@@ -91,11 +92,27 @@ function signedOutPage(): string {
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed out · Kala</title><style>html{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#09090b;color:#f8fafc;font:16px system-ui,sans-serif}.card{width:min(28rem,calc(100% - 2rem));padding:2rem;border:1px solid #27272a;border-radius:1rem;background:#18181b;box-sizing:border-box}.mark{width:3rem;height:3rem;display:grid;place-items:center;border-radius:.75rem;background:#0f766e;font-weight:800}h1{font-size:1.5rem;margin:1.25rem 0 .5rem}p{color:#a1a1aa;line-height:1.5}a{display:inline-flex;margin-top:1rem;padding:.75rem 1rem;border-radius:.65rem;background:#0f766e;color:white;text-decoration:none;font-weight:650}</style></head><body><main class="card"><div class="mark">AR</div><h1>You are signed out</h1><p>Your Kala browser session has ended. Sign in again when you are ready.</p><a href="/auth/login">Sign in</a></main></body></html>'
 }
 
+function inviteResultPage(kind: 'accepted' | 'verified_email_required' | 'email_mismatch' | 'unavailable'): string {
+  const copy = {
+    accepted: ['Invitation accepted', 'Your verified identity is now connected to the organization.', 'Open Kala'],
+    verified_email_required: ['Invitation not accepted', 'Your identity provider did not attest that your email is verified. Ask your administrator or identity provider for help.', 'Try another account'],
+    email_mismatch: ['Invitation not accepted', 'The verified email on this account does not match the invitation.', 'Try another account'],
+    unavailable: ['Invitation not accepted', 'This invitation is invalid, expired, revoked, or already used. Ask an organization administrator for a new link.', 'Return to sign in'],
+  }[kind]
+  const href = kind === 'accepted' ? '/' : '/auth/login?prompt=login'
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${copy[0]} · Kala</title></head><body><main><h1>${copy[0]}</h1><p>${copy[1]}</p><a href="${href}">${copy[2]}</a></main></body></html>`
+}
+
+function ownerBootstrapResultPage(result: { bootstrapId: string; confirmationCode: string }): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Owner confirmation required · Kala</title></head><body><main><h1>Operator confirmation required</h1><p>Login succeeded, but no organization or owner was created. Read this one-time code to the trusted operator and keep this page open while they compare the candidate identity.</p><p>Authorization: <strong>${result.bootstrapId}</strong></p><p>Confirmation code: <strong>${result.confirmationCode}</strong></p><p>After the operator confirms, return to the normal sign-in page.</p></main></body></html>`
+}
+
 export async function startRuntimeIngressGateway(options: {
   port: number
   oidc: OidcClient
   directory: RuntimeAssignmentStore
   organizations?: OrganizationStore
+  ownerBootstrap?: OwnerBootstrapGateway
   enterpriseSso?: EnterpriseSsoResolver
   loginStates: LoginStateStore
   hostOrigin: string
@@ -162,9 +179,16 @@ export async function startRuntimeIngressGateway(options: {
     const value = request.headers['x-kala-public-origin']
     return typeof value === 'string' ? value : publicUrl.origin
   }
+  const requireSameOriginWhenPresent = (request: IncomingMessage, response: ServerResponse): boolean => {
+    const origin = request.headers.origin
+    if (!origin || origin === requestPublicOrigin(request)) return true
+    response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    response.end(JSON.stringify({ error: 'forbidden', message: 'same-origin browser request is required' }))
+    return false
+  }
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = new URL(request.url ?? '/', options.publicOrigin)
-    if (isPublicInstallerPath(url.pathname)) {
+    if (isPublicInstallerPath(url.pathname) && (request.method === 'GET' || request.method === 'HEAD')) {
       request.headers['x-forwarded-proto'] = publicUrl.protocol.slice(0, -1)
       request.headers['x-forwarded-host'] = publicUrl.host
       proxy.web(request, response, { target: options.hostOrigin }, () => {
@@ -183,29 +207,63 @@ export async function startRuntimeIngressGateway(options: {
       response.end(signedOutPage())
       return
     }
+    if (url.pathname === '/auth/invite-result' && url.searchParams.get('status') === 'accepted') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      response.end(inviteResultPage('accepted')); return
+    }
+    if (url.pathname === '/auth/owner-bootstrap') {
+      const token = url.searchParams.get('token')?.trim() ?? ''
+      if (!options.ownerBootstrap || !isOwnerBootstrapToken(token)) { response.writeHead(404, { 'cache-control': 'no-store' }); response.end('owner bootstrap unavailable'); return }
+      const tokenHash = ownerBootstrapHash(token)
+      try { await options.ownerBootstrap.assertAvailable(tokenHash) } catch { response.writeHead(410, { 'cache-control': 'no-store' }); response.end('owner bootstrap unavailable'); return }
+      const oidcNonce = randomBytes(24).toString('base64url')
+      const login = await options.oidc.authorizationUrl(callbackUri, { prompt: 'login', nonce: oidcNonce })
+      const loginCookie = randomBytes(24).toString('base64url')
+      await options.loginStates.put(loginCookie, { ...login, oidcNonce, redirectUri: callbackUri, expiresAt: Date.now() + 10 * 60_000, ownerBootstrapHash: tokenHash })
+      response.writeHead(302, { location: login.url.href, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'set-cookie': `ak_login=${loginCookie}; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=600` }); response.end(); return
+    }
     if (url.pathname === '/auth/login') {
       const forceLogin = url.searchParams.get('prompt') === 'login'
+      const organizationInviteToken = url.searchParams.get('invite')?.trim()
+      if (organizationInviteToken && !/^ak_org_invite_[A-Za-z0-9_-]{43}$/u.test(organizationInviteToken)) {
+        response.writeHead(400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+        response.end(inviteResultPage('unavailable')); return
+      }
       const ssoSelector = url.searchParams.get('sso')?.trim()
       const ssoConnection = ssoSelector && options.enterpriseSso ? await options.enterpriseSso.resolve(ssoSelector) : undefined
       if (ssoSelector && !ssoConnection) {
         response.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' })
         response.end(JSON.stringify({ error: 'sso_connection_not_found' })); return
       }
+      const oidcNonce = randomBytes(24).toString('base64url')
       const login = await options.oidc.authorizationUrl(callbackUri, {
+        nonce: oidcNonce,
         ...(forceLogin ? { prompt: 'login' as const } : {}),
         ...(ssoConnection?.loginHint ? { loginHint: ssoConnection.loginHint } : {}),
         ...(ssoConnection ? { idpHint: ssoConnection.providerId } : {}),
       })
       const nonce = randomBytes(24).toString('base64url')
-      await options.loginStates.put(nonce, { ...login, redirectUri: callbackUri, expiresAt: Date.now() + 10 * 60_000, ...(ssoConnection ? { ssoConnectionId: ssoConnection.id } : {}) })
-      response.writeHead(302, { location: login.url.href, 'set-cookie': `ak_login=${nonce}; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=600` }); response.end(); return
+      await options.loginStates.put(nonce, { ...login, oidcNonce, redirectUri: callbackUri, expiresAt: Date.now() + 10 * 60_000, ...(ssoConnection ? { ssoConnectionId: ssoConnection.id } : {}), ...(organizationInviteToken ? { organizationInviteHash: inviteKey(organizationInviteToken) } : {}) })
+      response.writeHead(302, { location: login.url.href, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'set-cookie': `ak_login=${nonce}; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=600` }); response.end(); return
     }
     if (url.pathname === '/auth/callback') {
       const nonce = cookies(request).ak_login
       const login = nonce ? await options.loginStates.take(nonce) : undefined
       if (!login) { response.writeHead(400); response.end('invalid login state'); return }
-      const authentication = await options.oidc.callback(url, login.redirectUri, login.codeVerifier, login.state)
+      const authentication = await options.oidc.callback(url, login.redirectUri, login.codeVerifier, login.state, login.oidcNonce)
       const identity = authentication.identity
+      if (login.ownerBootstrapHash) {
+        try {
+          const result = await options.ownerBootstrap?.captureCandidate(login.ownerBootstrapHash, identity)
+          if (!result) throw new Error('owner_bootstrap_not_available')
+          response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'set-cookie': `ak_login=; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=0` })
+          response.end(ownerBootstrapResultPage(result)); return
+        } catch (reason) {
+          const code = reason instanceof Error ? reason.message : 'owner_bootstrap_not_available'
+          response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `ak_login=; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=0` })
+          response.end(JSON.stringify({ error: code })); return
+        }
+      }
       if (login.ssoConnectionId) {
         const connection = await options.enterpriseSso?.resolve(login.ssoConnectionId)
         if (!connection || !await options.enterpriseSso!.authorize(connection, identity)) {
@@ -213,7 +271,24 @@ export async function startRuntimeIngressGateway(options: {
           response.end(JSON.stringify({ error: 'sso_authentication_mismatch' })); return
         }
       }
-      const access = options.organizations ? await options.organizations.getOrCreateForIdentity(identity) : undefined
+      let access
+      if (login.organizationInviteHash) {
+        if (!options.organizations?.acceptInvite) {
+          response.writeHead(409, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+          response.end(inviteResultPage('unavailable')); return
+        }
+        try {
+          access = await options.organizations.acceptInvite(login.organizationInviteHash, identity)
+        } catch (reason) {
+          const code = reason instanceof Error ? reason.message : ''
+          const kind = code === 'invite_verified_email_required' ? 'verified_email_required'
+            : code === 'invite_email_mismatch' ? 'email_mismatch' : 'unavailable'
+          response.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'set-cookie': `ak_login=; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=0` })
+          response.end(inviteResultPage(kind)); return
+        }
+      } else {
+        access = options.organizations ? await options.organizations.getOrCreateForIdentity(identity) : undefined
+      }
       if (access && access.organization.status !== 'active') {
         denyInactiveOrganization(response, access.organization.status)
         return
@@ -233,7 +308,7 @@ export async function startRuntimeIngressGateway(options: {
         ...(authentication.refreshToken ? { refreshToken: options.secretBox.encrypt(authentication.refreshToken) } : {}),
         ...(authentication.accessTokenExpiresAt !== undefined ? { providerRefreshAfter: authentication.accessTokenExpiresAt - 5 * 60_000 } : {}),
       })
-      response.writeHead(302, { location: publicUrl.href, 'set-cookie': [`ak_session=${token}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=2592000`, `ak_login=; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=0`] }); response.end(); return
+      response.writeHead(302, { location: login.organizationInviteHash ? '/auth/invite-result?status=accepted' : publicUrl.href, 'set-cookie': [`ak_session=${token}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=2592000`, `ak_login=; HttpOnly${secure}; SameSite=Lax; Path=/auth; Max-Age=0`] }); response.end(); return
     }
     if (url.pathname === '/auth/me') {
       if (request.method !== 'GET') { response.writeHead(405, { allow: 'GET', 'cache-control': 'no-store' }); response.end(); return }
@@ -319,35 +394,73 @@ export async function startRuntimeIngressGateway(options: {
       response.end(request.method === 'HEAD' ? undefined : JSON.stringify(enterpriseManagementOpenApi))
       return
     }
-    if (url.pathname === '/api/v1/service-accounts' && request.method === 'POST') {
-      if (!session || !organizationAccess || !options.serviceAccounts) {
+    const serviceAccountItem = url.pathname.match(/^\/api\/v1\/service-accounts\/([^/]+)$/u)
+    const serviceAccountManagementRequest = url.pathname === '/api/v1/service-accounts' || serviceAccountItem !== null
+    if (serviceAccountManagementRequest) {
+      const bearer = typeof request.headers.authorization === 'string' && request.headers.authorization.startsWith('Bearer ')
+      if (bearer || !session || !organizationAccess || !options.serviceAccounts) {
         apiGatewayError(response, 401, 'authentication_required', 'browser administrator authentication is required')
-        return
-      }
-      if (request.headers.origin !== requestPublicOrigin(request)) {
-        apiGatewayError(response, 403, 'forbidden', 'same-origin browser request is required')
         return
       }
       if (!permits(organizationAccess.membership.role, 'organization:manage')) {
         apiGatewayError(response, 403, 'forbidden', 'organization:manage permission is required')
         return
       }
-      try {
-        const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { name?: unknown; scopes?: unknown }
-        if (typeof raw.name !== 'string' || !Array.isArray(raw.scopes)) {
-          apiGatewayError(response, 400, 'invalid_request', 'name and scopes are required')
+      if (request.method === 'GET' && !serviceAccountItem) {
+        try {
+          const items = await options.serviceAccounts.list(organizationAccess.organization.id)
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-request-id': randomBytes(16).toString('hex'), 'x-kala-api-version': 'v1', 'x-kala-api-compatibility': '1' })
+          response.end(JSON.stringify({ items }))
+        } catch {
+          apiGatewayError(response, 500, 'internal_error', 'service accounts could not be listed')
+        }
+        return
+      }
+      if (request.method === 'POST' && !serviceAccountItem) {
+        if (request.headers.origin !== requestPublicOrigin(request)) {
+          apiGatewayError(response, 403, 'forbidden', 'same-origin browser request is required')
           return
         }
-        const created = await options.serviceAccounts.create({
-          organizationId: organizationAccess.organization.id,
-          name: raw.name,
-          scopes: raw.scopes as ServiceAccountScope[],
-        })
-        response.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-request-id': randomBytes(16).toString('hex'), 'x-kala-api-version': 'v1', 'x-kala-api-compatibility': '1' })
-        response.end(JSON.stringify(created))
-      } catch (error) {
-        apiGatewayError(response, 400, 'invalid_request', error instanceof Error ? error.message : 'invalid service account')
+        try {
+          const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { name?: unknown; scopes?: unknown; expiresAt?: unknown }
+          if (typeof raw.name !== 'string' || !Array.isArray(raw.scopes) || (raw.expiresAt !== undefined && typeof raw.expiresAt !== 'string')) {
+            apiGatewayError(response, 400, 'invalid_request', 'name, scopes, and expiration are invalid')
+            return
+          }
+          const created = await options.serviceAccounts.create({
+            organizationId: organizationAccess.organization.id,
+            name: raw.name,
+            scopes: raw.scopes as ServiceAccountScope[],
+            ...(raw.expiresAt === undefined ? {} : { expiresAt: raw.expiresAt }),
+          })
+          response.writeHead(201, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-request-id': randomBytes(16).toString('hex'), 'x-kala-api-version': 'v1', 'x-kala-api-compatibility': '1' })
+          response.end(JSON.stringify(created))
+        } catch (error) {
+          if (error instanceof ServiceAccountInputError || error instanceof SyntaxError) apiGatewayError(response, 400, 'invalid_request', 'invalid service account')
+          else apiGatewayError(response, 500, 'internal_error', 'service account could not be created')
+        }
+        return
       }
+      if (request.method === 'DELETE' && serviceAccountItem) {
+        if (request.headers.origin !== requestPublicOrigin(request)) {
+          apiGatewayError(response, 403, 'forbidden', 'same-origin browser request is required')
+          return
+        }
+        try {
+          const revoked = await options.serviceAccounts.revoke(organizationAccess.organization.id, serviceAccountItem[1]!)
+          if (!revoked) {
+            apiGatewayError(response, 404, 'not_found', 'service account was not found')
+            return
+          }
+          response.writeHead(204, { 'cache-control': 'no-store' })
+          response.end()
+        } catch {
+          apiGatewayError(response, 500, 'internal_error', 'service account could not be revoked')
+        }
+        return
+      }
+      response.setHeader('allow', serviceAccountItem ? 'DELETE' : 'GET, POST')
+      apiGatewayError(response, 405, 'invalid_request', 'method not allowed')
       return
     }
     if (url.pathname === '/api/v1' || url.pathname.startsWith('/api/v1/')) {
@@ -410,41 +523,95 @@ export async function startRuntimeIngressGateway(options: {
       return
     }
     if (url.pathname.startsWith('/auth/executor-pairings') && (/\/claim$/u.test(url.pathname) || (url.pathname === '/auth/executor-pairings' && request.method === 'POST'))) {
-      const body = request.method === 'POST' ? await readRequestBody(request) : undefined
-      const upstream = await requestRuntime(options.hostOrigin, url.pathname, request.method, { 'content-type': request.headers['content-type'] ?? 'application/json' }, body, options.runtimeTls)
-      response.writeHead(upstream.status, { 'content-type': upstream.contentType, 'cache-control': 'no-store' });response.end(upstream.body);return
+      // A caller without an organization assignment cannot safely choose a Runtime
+      // Unit. Private Cloud enrollment uses a short-lived, organization-bound invite.
+      response.writeHead(409, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: 'executor_invite_required', message: 'Create an Executor invite in the authenticated workspace and reconnect with --invite.' }))
+      return
     }
     if (url.pathname === '/organization' && request.method === 'GET' && organizationAccess && options.organizations) {
       const members = await options.organizations.listMembers(organizationAccess.organization.id)
-      const administration = await options.organizations.administrationSnapshot?.(organizationAccess.organization.id)
+      const [administration, invites] = await Promise.all([
+        options.organizations.administrationSnapshot?.(organizationAccess.organization.id),
+        options.organizations.listInvites?.(organizationAccess.organization.id) ?? Promise.resolve([]),
+      ])
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       response.end(JSON.stringify({
         organization: { id: organizationAccess.organization.id, name: organizationAccess.organization.name }, role: organizationAccess.membership.role,
         permissions: ['runtime:read', 'runtime:write', 'workspace:manage', 'organization:manage', 'policy:manage'].filter((permission) => permits(organizationAccess.membership.role, permission as Parameters<typeof permits>[1])),
         members: members.map((member) => ({ issuer: member.identity.issuer, subject: member.identity.subject, displayName: member.identity.displayName, email: member.identity.email, role: member.role, createdAt: member.createdAt })),
         ...(administration ?? {}),
+        invites,
       })); return
     }
     if (url.pathname === '/organization/retention' && request.method === 'PUT' && organizationAccess && options.organizations?.updateRetentionPolicy) {
+      if (!requireSameOriginWhenPresent(request, response)) return
       if (!permits(organizationAccess.membership.role, 'policy:manage')) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'forbidden' })); return }
       const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { sessionDays: number; artifactDays: number; auditDays: number; deletedResourceGraceDays: number }
-      await options.organizations!.updateRetentionPolicy!(organizationAccess.organization.id, raw)
+      try {
+        await options.organizations!.updateRetentionPolicy!(organizationAccess.organization.id, raw)
+      } catch (reason) {
+        if (reason instanceof Error && reason.message.startsWith('unsupported_retention_fields:')) {
+          const unsupportedFields = reason.message.slice('unsupported_retention_fields:'.length).split(',')
+          response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+          response.end(JSON.stringify({ error: 'unsupported_retention_fields', unsupportedFields, message: 'Only sessionDays is enforced; artifact, audit, backup, and deleted-resource retention require an approved compliance policy.' }))
+          return
+        }
+        throw reason
+      }
       response.writeHead(204, { 'cache-control': 'no-store' }); response.end(); return
     }
-    if (url.pathname === '/organization/members' && ['POST', 'PATCH', 'DELETE'].includes(request.method ?? '') && organizationAccess && options.organizations) {
+    if (url.pathname === '/organization/invites' && request.method === 'POST' && organizationAccess && options.organizations) {
+      if (!requireSameOriginWhenPresent(request, response)) return
+      if (!permits(organizationAccess.membership.role, 'organization:manage')) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'organization:manage' })); return }
+      if (!options.organizations.createInvite) { response.writeHead(501, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'organization_invites_not_supported' })); return }
+      const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { email?: string; role?: 'admin' | 'member' | 'viewer'; expiresInDays?: number }
+      const expiresInDays = raw.expiresInDays ?? 7
+      if (!raw.email || !raw.role || !['admin', 'member', 'viewer'].includes(raw.role) || !Number.isSafeInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 30) {
+        response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'invalid_invite' })); return
+      }
+      try {
+        const created = await options.organizations.createInvite(organizationAccess.organization.id, identity!, raw.email, raw.role, new Date(Date.now() + expiresInDays * 86_400_000).toISOString())
+        const inviteUrl = new URL('/auth/login', requestPublicOrigin(request)); inviteUrl.searchParams.set('invite', created.token)
+        response.writeHead(201, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+        response.end(JSON.stringify({ invite: created.invite, inviteUrl: inviteUrl.href })); return
+      } catch (reason) {
+        if (reason instanceof Error && ['invalid_invite_email', 'invalid_invite_expiration'].includes(reason.message)) {
+          response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: reason.message })); return
+        }
+        throw reason
+      }
+    }
+    const inviteMatch = /^\/organization\/invites\/(oinv_[A-Za-z0-9_-]+)$/u.exec(url.pathname)
+    if (inviteMatch && request.method === 'DELETE' && organizationAccess && options.organizations) {
+      if (!requireSameOriginWhenPresent(request, response)) return
+      if (!permits(organizationAccess.membership.role, 'organization:manage')) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'organization:manage' })); return }
+      if (!options.organizations.revokeInvite) { response.writeHead(501, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'organization_invites_not_supported' })); return }
+      try { await options.organizations.revokeInvite(organizationAccess.organization.id, inviteMatch[1]!) } catch (reason) {
+        if (reason instanceof Error && reason.message === 'invite_not_found') { response.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'invite_not_found' })); return }
+        throw reason
+      }
+      response.writeHead(204, { 'cache-control': 'no-store' }); response.end(); return
+    }
+    if (url.pathname === '/organization/members' && request.method === 'POST' && organizationAccess) {
+      response.writeHead(405, { allow: 'PATCH, DELETE', 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: 'member_invite_required' })); return
+    }
+    if (url.pathname === '/organization/members' && ['PATCH', 'DELETE'].includes(request.method ?? '') && organizationAccess && options.organizations) {
+      if (!requireSameOriginWhenPresent(request, response)) return
       if (!permits(organizationAccess.membership.role, 'organization:manage')) { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'organization:manage' })); return }
       const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { issuer?: string; subject?: string; displayName?: string; email?: string; role?: 'admin' | 'member' | 'viewer' }
       if (!raw.issuer || !raw.subject || (request.method !== 'DELETE' && !raw.role)) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'invalid_member' })); return }
       const target = { issuer: raw.issuer, subject: raw.subject, ...(raw.displayName ? { displayName: raw.displayName } : {}), ...(raw.email ? { email: raw.email } : {}) }
-      if (request.method === 'POST') await options.organizations.addMember(organizationAccess.organization.id, target, raw.role!)
-      else if (request.method === 'PATCH') await options.organizations.updateMemberRole(organizationAccess.organization.id, target, raw.role!)
+      if (request.method === 'PATCH') await options.organizations.updateMemberRole(organizationAccess.organization.id, target, raw.role!)
       else await options.organizations.removeMember(organizationAccess.organization.id, target)
       // Authorization changes take effect immediately on every device. Existing
       // cookies cannot retain the removed or previous role until expiry.
       await options.sessions.revokeAllForIdentity(target, 'administrator', Date.now())
-      response.writeHead(request.method === 'POST' ? 201 : 204, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(request.method === 'POST' ? JSON.stringify({ ok: true }) : undefined); return
+      response.writeHead(204, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(); return
     }
     if (url.pathname === '/organization/ownership' && request.method === 'POST' && organizationAccess && options.organizations) {
+      if (!requireSameOriginWhenPresent(request, response)) return
       if (organizationAccess.membership.role !== 'owner') { response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'owner_required' })); return }
       const raw = JSON.parse((await readRequestBody(request)).toString('utf8')) as { issuer?: string; subject?: string }
       if (!raw.issuer || !raw.subject) { response.writeHead(400, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'invalid_member' })); return }
@@ -514,12 +681,18 @@ export async function startRuntimeIngressGateway(options: {
       response.writeHead(upstream.status, { 'content-type': upstream.contentType, 'cache-control': 'no-store' });response.end(upstream.body);return
     }
     if (url.pathname === '/auth/executor-invites' && request.method === 'POST') {
+      if (!requireSameOriginWhenPresent(request, response)) return
       if (organizationAccess && !permits(organizationAccess.membership.role, 'workspace:manage')) { response.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify({ error: 'forbidden', requiredPermission: 'workspace:manage' })); return }
       const body = await readRequestBody(request)
       const upstream = await requestRuntime(options.hostOrigin, url.pathname, 'POST', {
           'content-type': request.headers['content-type'] ?? 'application/json',
           'x-agent-runlab-runtime-unit': assignment.unitId,
           'x-agent-runlab-ingress-secret': options.ingressSecret,
+          ...(organizationAccess ? {
+            'x-agent-runlab-organization-id': organizationAccess.organization.id,
+            'x-agent-runlab-organization-role': organizationAccess.membership.role,
+            'x-agent-runlab-principal': Buffer.from(`${identity!.issuer}\0${identity!.subject}`, 'utf8').toString('base64url'),
+          } : {}),
         }, body, options.runtimeTls)
       const text = upstream.body.toString('utf8')
       if (upstream.status >= 200 && upstream.status < 300) {
@@ -564,17 +737,32 @@ export async function startRuntimeIngressGateway(options: {
     if (organizationAccess && organizationAccess.organization.status !== 'active') { socket.destroy(); return }
     const assignment = organizationAccess ? { unitId: organizationAccess.organization.unitId, identity: identity! } : identity ? await options.directory.findByIdentity(identity) : undefined
     const executorInvite = typeof request.headers['x-kala-executor-invite'] === 'string' ? request.headers['x-kala-executor-invite'] : undefined
+    const routeHint = typeof request.headers['x-kala-executor-route'] === 'string' && /^[A-Za-z0-9_-]{43}$/u.test(request.headers['x-kala-executor-route']) ? request.headers['x-kala-executor-route'] : undefined
     const inviteUnitId = !assignment && executorInvite ? await options.directory.findUnitByExecutorInvite(executorInvite) : undefined
-    const unitId = assignment?.unitId ?? inviteUnitId
+    const routeUnitId = !assignment && !inviteUnitId && routeHint ? await options.directory.findUnitByExecutorRouteHint(routeHint) : undefined
+    const executorEnrollment = !assignment && (inviteUnitId !== undefined || routeUnitId !== undefined)
+    const unitId = assignment?.unitId ?? inviteUnitId ?? routeUnitId
     // Dashboard Socket.IO is a bidirectional command channel, not a read-only
     // stream. Viewer/read-only memberships must not reach mutating client events.
     // Executor enrollment uses a separate invite-authenticated path.
-    const requiredPermission = executorInvite ? undefined : 'runtime:write'
+    const requiredPermission = executorEnrollment ? undefined : 'runtime:write'
     if (!unitId || (organizationAccess && requiredPermission && !permits(organizationAccess.membership.role, requiredPermission)) || (assignment && (!identity || identity.issuer !== assignment.identity.issuer || identity.subject !== assignment.identity.subject))) { socket.destroy(); return }
     delete request.headers.cookie
     delete request.headers.authorization
+    delete request.headers['x-agent-runlab-runtime-unit']
+    delete request.headers['x-agent-runlab-ingress-secret']
+    delete request.headers['x-agent-runlab-organization-id']
+    delete request.headers['x-agent-runlab-organization-role']
+    delete request.headers['x-agent-runlab-principal']
+    delete request.headers['x-kala-executor-route']
+    if (!executorEnrollment) delete request.headers['x-kala-executor-invite']
     request.headers['x-agent-runlab-runtime-unit'] = unitId
     request.headers['x-agent-runlab-ingress-secret'] = options.ingressSecret
+    if (organizationAccess && !executorEnrollment) {
+      request.headers['x-agent-runlab-organization-id'] = organizationAccess.organization.id
+      request.headers['x-agent-runlab-organization-role'] = organizationAccess.membership.role
+      request.headers['x-agent-runlab-principal'] = Buffer.from(`${identity!.issuer}\0${identity!.subject}`, 'utf8').toString('base64url')
+    }
     proxy.ws(request, socket, head, { target: options.hostOrigin }, () => socket.destroy())
   })().catch(() => socket.destroy()) })
   await new Promise<void>((resolve) => http.listen(options.port, options.listenHost ?? '127.0.0.1', resolve))

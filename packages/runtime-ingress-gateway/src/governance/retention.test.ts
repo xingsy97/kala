@@ -13,16 +13,18 @@ describe('RetentionService', () => {
 
     expect(database.transactionCount).toBe(1)
     expect(database.executed.map((entry) => entry.sql)).toEqual([
-      'SELECT session_days FROM retention_policies WHERE organization_id=$1',
+      'SELECT r.session_days,o.runtime_unit_id FROM retention_policies r JOIN organizations o ON o.id=r.organization_id WHERE r.organization_id=$1',
+      "INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,NULL,'system','retention.purge','organization',$2,'allowed',$3)",
       "DELETE FROM notification_devices WHERE organization_id=$1 AND updated_at < $2::timestamptz - ($3::text || ' days')::interval",
       "DELETE FROM browser_sessions WHERE organization_id=$1 AND COALESCE(revoked_at,absolute_expires_at) < $2::timestamptz - ($3::text || ' days')::interval",
-      "INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,'system','system','retention.purge','organization',$2,'succeeded',$3)",
+      'UPDATE audit_events SET result=$2,metadata=$3 WHERE id=$1',
     ])
-    expect(database.executed[1]?.values).toEqual(['org_acme', now, 30])
+    expect(database.executed[1]?.values).toEqual([expect.any(String), 'org_acme', { before: '2026-08-08T04:00:00.000Z', phase: 'started' }])
     expect(database.executed[2]?.values).toEqual(['org_acme', now, 30])
-    expect(database.executed[3]?.values).toEqual([
-      expect.any(String),
-      'org_acme',
+    expect(database.executed[3]?.values).toEqual(['org_acme', now, 30])
+    expect(database.executed[4]?.values).toEqual([
+      database.executed[1]?.values[0],
+      'succeeded',
       { before: '2026-08-08T04:00:00.000Z', sessions: 2, devices: 1, hostSessions: 0 },
     ])
   })
@@ -38,8 +40,37 @@ describe('RetentionService', () => {
     await expect(service.purgeOrganization('org_acme', now)).resolves.toEqual({ sessions: 2, devices: 1, hostSessions: 3 })
     expect(hostData.purgeOrganizationSessions).toHaveBeenCalledWith({
       organizationId: 'org_acme',
+      runtimeUnitId: 'unit_acme',
       before: new Date('2026-08-08T04:00:00Z'),
     })
+  })
+
+  it('reports a Host failure and retries that tenant on the next purge', async () => {
+    const database = new FakeRetentionDatabase()
+    const hostData = {
+      purgeOrganizationSessions: vi.fn()
+        .mockRejectedValueOnce(new Error('temporary Host storage failure'))
+        .mockResolvedValueOnce({ sessions: 1 }),
+    }
+    const service = new RetentionService(database, hostData)
+    const now = new Date('2026-09-07T04:00:00Z')
+
+    await expect(service.purgeAllOrganizations(now)).resolves.toEqual({
+      purged: [],
+      failures: [{ organizationId: 'org_acme', error: 'temporary Host storage failure' }],
+    })
+    await expect(service.purgeAllOrganizations(now)).resolves.toMatchObject({
+      purged: [{ organizationId: 'org_acme', hostSessions: 1 }],
+      failures: [],
+    })
+    expect(hostData.purgeOrganizationSessions).toHaveBeenCalledTimes(2)
+    expect(database.executed.filter((entry) => entry.sql.startsWith('UPDATE audit_events')).map((entry) => entry.values[1])).toEqual(['failed', 'succeeded'])
+  })
+
+  it('does not delete data when its durable system audit intention cannot be recorded', async () => {
+    const database = new FakeRetentionDatabase({ failAuditInsert: true })
+    await expect(new RetentionService(database).purgeOrganization('org_acme')).rejects.toThrow('audit write failed')
+    expect(database.executed.some((entry) => entry.sql.startsWith('DELETE '))).toBe(false)
   })
 
   it('fails closed when retention policy is missing', async () => {
@@ -75,7 +106,7 @@ describe('RetentionService', () => {
     const database = new FakeRetentionDatabase({
       organizationRows: [{ organization_id: 'org_acme' }, { organization_id: 'org_missing' }],
       policyRowsByOrganization: new Map([
-        ['org_acme', [{ session_days: 30 }]],
+        ['org_acme', [{ session_days: 30, runtime_unit_id: 'unit_acme' }]],
         ['org_missing', []],
       ]),
     })
@@ -116,17 +147,19 @@ class FakeRetentionDatabase implements ControlPlaneDatabase, SqlExecutor {
   transactionCount = 0
 
   constructor(private readonly options: {
-    policyRows?: Array<{ session_days: number }>
-    policyRowsByOrganization?: Map<string, Array<{ session_days: number }>>
+    policyRows?: Array<{ session_days: number; runtime_unit_id: string }>
+    policyRowsByOrganization?: Map<string, Array<{ session_days: number; runtime_unit_id: string }>>
     organizationRows?: Array<{ organization_id: string }>
+    failAuditInsert?: boolean
   } = {}) {}
 
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(text: string, values: readonly unknown[] = []): Promise<SqlQueryResult<Row>> {
     const sql = text.trim().replace(/\s+/gu, ' ')
     this.executed.push({ sql, values })
+    if (sql.startsWith('INSERT INTO audit_events') && this.options.failAuditInsert) throw new Error('audit write failed')
     if (sql.startsWith('SELECT r.organization_id FROM retention_policies')) return result((this.options.organizationRows ?? [{ organization_id: 'org_acme' }]) as unknown as Row[])
-    if (sql.startsWith('SELECT session_days FROM retention_policies') && this.options.policyRowsByOrganization) return result((this.options.policyRowsByOrganization.get(String(values[0])) ?? []) as unknown as Row[])
-    if (sql.startsWith('SELECT session_days FROM retention_policies')) return result((this.options.policyRows ?? [{ session_days: 30 }]) as unknown as Row[])
+    if (sql.startsWith('SELECT r.session_days,o.runtime_unit_id') && this.options.policyRowsByOrganization) return result((this.options.policyRowsByOrganization.get(String(values[0])) ?? []) as unknown as Row[])
+    if (sql.startsWith('SELECT r.session_days,o.runtime_unit_id')) return result((this.options.policyRows ?? [{ session_days: 30, runtime_unit_id: 'unit_acme' }]) as unknown as Row[])
     if (sql.startsWith('DELETE FROM notification_devices')) return result([], 1)
     if (sql.startsWith('DELETE FROM browser_sessions')) return result([], 2)
     if (sql.startsWith('SELECT * FROM organizations')) return result([{ id: values[0] } as unknown as Row])

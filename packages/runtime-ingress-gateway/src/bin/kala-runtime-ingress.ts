@@ -19,6 +19,9 @@ import { loadEnterpriseSsoResolver } from '../auth/enterprise-sso-config.js'
 import { SlidingWindowRateLimiter } from '../governance/rate-limit.js'
 import { resolveRuntimeIngressControlPlaneMode } from '../config/control-plane.js'
 import { ServiceAccountService } from '../api/service-accounts.js'
+import { createRuntimeHostRetentionClient, RetentionService, startRetentionScheduler } from '../governance/retention.js'
+import { OwnerBootstrapService } from '../organizations/owner-bootstrap.js'
+import { RuntimeUnitProvisioner } from '../organizations/runtime-unit-provisioner.js'
 
 async function main(): Promise<void> {
   const port = Number(process.env.KALA_INGRESS_PORT ?? 13001)
@@ -77,17 +80,28 @@ async function main(): Promise<void> {
       windowMs: numberEnv('KALA_INGRESS_RATE_LIMIT_WINDOW_MS', 60_000),
     })
     : undefined
+  const requestHostProvisioning = async (body: unknown) => await requestRuntime(
+    hostOrigin,
+    '/internal/runtime-units',
+    'POST',
+    { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': ingressSecret },
+    Buffer.from(JSON.stringify(body)),
+    runtimeTls,
+  )
+  const postgresProvisioner = database ? new RuntimeUnitProvisioner(database, requestHostProvisioning) : undefined
   const gateway = await startRuntimeIngressGateway({
     port,
     listenHost: process.env.KALA_INGRESS_LISTEN_HOST ?? '127.0.0.1',
     oidc,
     organizations,
+    ...(database ? { ownerBootstrap: new OwnerBootstrapService(database) } : {}),
     ...(enterpriseSso ? { enterpriseSso } : {}),
     directory: {
       getOrCreateForIdentity: async (identity) => { const access = await organizations.getOrCreateForIdentity(identity); return { unitId: access.organization.unitId, identity } },
       findByIdentity: async (identity) => { const access = await organizations.findAccess(identity); return access ? { unitId: access.organization.unitId, identity } : undefined },
       bindExecutorInvite: (token, unitId) => organizations.bindExecutorInvite(token, unitId),
       findUnitByExecutorInvite: (token) => organizations.findUnitByExecutorInvite(token),
+      findUnitByExecutorRouteHint: (inviteHash) => organizations.findUnitByExecutorRouteHint(inviteHash),
     },
     loginStates,
     sessions,
@@ -106,21 +120,30 @@ async function main(): Promise<void> {
     } : {}),
     ...(rateLimiter ? { rateLimiter } : {}),
     provision: async (unitId) => {
-      const response = await requestRuntime(
-        hostOrigin,
-        '/internal/runtime-units',
-        'POST',
-        { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': ingressSecret },
-        Buffer.from(JSON.stringify({ unitId, operationId: `provision:${unitId}`, generation: 1 })),
-        runtimeTls,
-      )
+      if (postgresProvisioner) return await postgresProvisioner.provision(unitId)
+      const response = await requestHostProvisioning({ unitId, operationId: `provision:${unitId}`, generation: 1 })
       if (response.status < 200 || response.status >= 300) {
         throw new Error(`Tenant provisioning failed: ${response.status} ${response.body.toString('utf8')}`)
       }
     },
   })
+  const retentionScheduler = database && process.env.KALA_INGRESS_RETENTION_ENABLED !== '0' ? startRetentionScheduler({
+    service: new RetentionService(database, createRuntimeHostRetentionClient({
+      origin: hostOrigin,
+      ingressSecret,
+      ...(runtimeTls ? { tls: runtimeTls } : {}),
+    })),
+    intervalMs: numberEnv('KALA_INGRESS_RETENTION_INTERVAL_MS', 24 * 60 * 60 * 1000),
+    onResult: (result) => {
+      process.stdout.write(`${JSON.stringify({ event: 'retention_purge_completed', purged: result.purged, failures: result.failures })}\n`)
+    },
+    onError: (error) => {
+      process.stderr.write(`${JSON.stringify({ event: 'retention_purge_failed', error: error.message })}\n`)
+    },
+  }) : undefined
+  if (database && !retentionScheduler) process.stdout.write(`${JSON.stringify({ event: 'retention_scheduler_disabled' })}\n`)
   process.stdout.write(`${JSON.stringify({ event: 'private_cloud_gateway_ready', port: gateway.port })}\n`)
-  const close = async (): Promise<void> => { await gateway.close(); await database?.close(); process.exit(0) }
+  const close = async (): Promise<void> => { retentionScheduler?.stop(); await gateway.close(); await database?.close(); process.exit(0) }
   process.on('SIGTERM', () => { void close() }); process.on('SIGINT', () => { void close() })
 }
 

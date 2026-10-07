@@ -10,6 +10,8 @@ export type OrganizationStatus = 'provisioning' | 'active' | 'suspended' | 'clos
 export type Organization = { id: string; name: string; unitId: string; status: OrganizationStatus; createdAt: string }
 export type OrganizationMembership = { organizationId: string; identity: AuthenticatedIdentity; role: OrganizationRole; createdAt: string }
 export type OrganizationAccess = { organization: Organization; membership: OrganizationMembership }
+export type OrganizationInvite = { id: string; organizationId: string; email: string; role: Exclude<OrganizationRole, 'owner'>; createdAt: string; expiresAt: string; acceptedAt?: string; revokedAt?: string }
+export type CreatedOrganizationInvite = { invite: OrganizationInvite; token: string }
 
 export interface OrganizationStore {
   getOrCreateForIdentity(identity: AuthenticatedIdentity): Promise<OrganizationAccess>
@@ -19,8 +21,13 @@ export interface OrganizationStore {
   updateMemberRole(organizationId: string, identity: AuthenticatedIdentity, role: Exclude<OrganizationRole, 'owner'>): Promise<void>
   removeMember(organizationId: string, identity: AuthenticatedIdentity): Promise<void>
   transferOwnership(organizationId: string, currentOwner: AuthenticatedIdentity, nextOwner: AuthenticatedIdentity): Promise<void>
+  createInvite?(organizationId: string, createdBy: AuthenticatedIdentity, email: string, role: Exclude<OrganizationRole, 'owner'>, expiresAt: string): Promise<CreatedOrganizationInvite>
+  listInvites?(organizationId: string): Promise<readonly OrganizationInvite[]>
+  revokeInvite?(organizationId: string, inviteId: string): Promise<void>
+  acceptInvite?(inviteTokenHash: string, identity: AuthenticatedIdentity): Promise<OrganizationAccess>
   bindExecutorInvite(inviteToken: string, unitId: string): Promise<void>
   findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined>
+  findUnitByExecutorRouteHint(inviteHash: string): Promise<string | undefined>
   administrationSnapshot?(organizationId: string): Promise<Record<string, unknown>>
   updateRetentionPolicy?(organizationId: string, policy: { sessionDays: number; artifactDays: number; auditDays: number; deletedResourceGraceDays: number }): Promise<void>
 }
@@ -40,6 +47,7 @@ export class MemoryOrganizationStore implements OrganizationStore {
   protected readonly organizations = new Map<string, Organization>()
   protected readonly memberships = new Map<string, OrganizationMembership>()
   protected readonly executorInviteUnits = new Map<string, string>()
+  protected readonly organizationInvites = new Map<string, OrganizationInvite & { tokenHash: string }>()
 
   async getOrCreateForIdentity(identity: AuthenticatedIdentity): Promise<OrganizationAccess> {
     const existing = await this.findAccess(identity)
@@ -64,8 +72,11 @@ export class MemoryOrganizationStore implements OrganizationStore {
 
   async addMember(organizationId: string, identity: AuthenticatedIdentity, role: Exclude<OrganizationRole, 'owner'>): Promise<OrganizationMembership> {
     if (!this.organizations.has(organizationId)) throw new Error('organization not found')
-    const membership = { organizationId, identity, role, createdAt: new Date().toISOString() }
-    this.memberships.set(identityKey(identity), membership)
+    const key = identityKey(identity)
+    const existing = this.memberships.get(key)
+    if (existing && existing.organizationId !== organizationId) throw new Error('identity_already_belongs_to_another_organization')
+    const membership = { organizationId, identity, role, createdAt: existing?.createdAt ?? new Date().toISOString() }
+    this.memberships.set(key, membership)
     return membership
   }
 
@@ -90,8 +101,60 @@ export class MemoryOrganizationStore implements OrganizationStore {
     this.memberships.set(nextKey, { ...next, role: 'owner' })
   }
 
+  async createInvite(organizationId: string, createdBy: AuthenticatedIdentity, email: string, role: Exclude<OrganizationRole, 'owner'>, expiresAt: string): Promise<CreatedOrganizationInvite> {
+    const creator = this.memberships.get(identityKey(createdBy))
+    if (!creator || creator.organizationId !== organizationId || !['owner', 'admin'].includes(creator.role)) throw new Error('invite_creator_not_authorized')
+    const normalizedEmail = normalizeInviteEmail(email)
+    assertInviteExpiration(expiresAt)
+    const token = `ak_org_invite_${randomBytes(32).toString('base64url')}`
+    const invite: OrganizationInvite = { id: `oinv_${randomBytes(13).toString('hex')}`, organizationId, email: normalizedEmail, role, createdAt: new Date().toISOString(), expiresAt }
+    this.organizationInvites.set(invite.id, { ...invite, tokenHash: inviteKey(token) })
+    return { invite, token }
+  }
+
+  async listInvites(organizationId: string): Promise<readonly OrganizationInvite[]> {
+    return [...this.organizationInvites.values()]
+      .filter((invite) => invite.organizationId === organizationId)
+      .map(({ tokenHash: _tokenHash, ...invite }) => invite)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  }
+
+  async revokeInvite(organizationId: string, inviteId: string): Promise<void> {
+    const invite = this.organizationInvites.get(inviteId)
+    if (!invite || invite.organizationId !== organizationId || invite.acceptedAt || invite.revokedAt) throw new Error('invite_not_found')
+    this.organizationInvites.set(inviteId, { ...invite, revokedAt: new Date().toISOString() })
+  }
+
+  async acceptInvite(inviteTokenHash: string, identity: AuthenticatedIdentity): Promise<OrganizationAccess> {
+    const invite = [...this.organizationInvites.values()].find((candidate) => candidate.tokenHash === inviteTokenHash)
+    if (!invite || invite.acceptedAt || invite.revokedAt || Date.parse(invite.expiresAt) <= Date.now()) throw new Error('invite_not_available')
+    if (!identity.email || identity.emailVerified !== true) throw new Error('invite_verified_email_required')
+    if (normalizeInviteEmail(identity.email) !== invite.email) throw new Error('invite_email_mismatch')
+    const existing = this.memberships.get(identityKey(identity))
+    if (existing && existing.organizationId !== invite.organizationId) throw new Error('identity_already_belongs_to_another_organization')
+    const organization = this.organizations.get(invite.organizationId)
+    if (!organization || organization.status !== 'active') throw new Error('organization_not_active')
+    const membership: OrganizationMembership = { organizationId: invite.organizationId, identity, role: existing?.role === 'owner' ? 'owner' : invite.role, createdAt: existing?.createdAt ?? new Date().toISOString() }
+    this.memberships.set(identityKey(identity), membership)
+    this.organizationInvites.set(invite.id, { ...invite, acceptedAt: new Date().toISOString() })
+    return { organization, membership }
+  }
+
   async bindExecutorInvite(inviteToken: string, unitId: string): Promise<void> { this.executorInviteUnits.set(inviteKey(inviteToken), unitId) }
-  async findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined> { return this.executorInviteUnits.get(inviteKey(inviteToken)) }
+  async findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined> { return this.findUnitByExecutorRouteHint(inviteKey(inviteToken)) }
+  async findUnitByExecutorRouteHint(inviteHash: string): Promise<string | undefined> { return this.executorInviteUnits.get(inviteHash) }
 }
 
 export function newOrganizationId(): string { return `org_${randomBytes(13).toString('hex')}` }
+
+export function normalizeInviteEmail(email: string): string {
+  const normalized = email.trim().toLowerCase()
+  if (normalized.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized)) throw new Error('invalid_invite_email')
+  return normalized
+}
+
+export function assertInviteExpiration(expiresAt: string): void {
+  const value = Date.parse(expiresAt)
+  const now = Date.now()
+  if (!Number.isFinite(value) || value <= now || value > now + 30 * 86_400_000) throw new Error('invalid_invite_expiration')
+}

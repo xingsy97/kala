@@ -57,7 +57,11 @@ export class JsonRuntimeAssignmentStore implements RuntimeAssignmentStore {
   }
 
   async findUnitByExecutorInvite(inviteToken: string): Promise<string | undefined> {
-    return this.executorInviteUnits.get(inviteKey(inviteToken))
+    return this.findUnitByExecutorRouteHint(inviteKey(inviteToken))
+  }
+
+  async findUnitByExecutorRouteHint(inviteHash: string): Promise<string | undefined> {
+    return this.executorInviteUnits.get(inviteHash)
   }
 
   private findLegacyLocalAssignment(identity: AuthenticatedIdentity): RuntimeAssignment | undefined {

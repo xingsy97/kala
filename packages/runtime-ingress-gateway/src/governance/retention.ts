@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { ControlPlaneDatabase } from '../persistence/postgres.js'
+import { requestRuntime } from '../edge/server.js'
 
 export type RetentionPurgeResult = {
   organizationId: string
@@ -18,21 +19,35 @@ export class RetentionService {
   constructor(
     private readonly database: ControlPlaneDatabase,
     private readonly hostData?: {
-      purgeOrganizationSessions(params: { organizationId: string; before: Date }): Promise<{ sessions: number }>
+      purgeOrganizationSessions(params: { organizationId: string; runtimeUnitId: string; before: Date }): Promise<{ sessions: number }>
     },
   ) {}
   async purgeOrganization(organizationId: string, now = new Date()): Promise<{ sessions: number; devices: number; hostSessions: number }> {
     const controlPlane = await this.database.transaction(async (transaction) => {
-      const policy = await transaction.query<{ session_days: number }>('SELECT session_days FROM retention_policies WHERE organization_id=$1', [organizationId])
+      const policy = await transaction.query<{ session_days: number; runtime_unit_id: string }>(`SELECT r.session_days,o.runtime_unit_id
+        FROM retention_policies r JOIN organizations o ON o.id=r.organization_id
+        WHERE r.organization_id=$1`, [organizationId])
       if (!policy.rows[0]) throw new Error('retention policy not found')
+      const before = new Date(now.getTime() - policy.rows[0].session_days * 24 * 60 * 60 * 1000)
+      const auditId = randomUUID()
+      // Commit an audit intention together with control-plane deletion before touching Host/NFS.
+      await transaction.query(
+        `INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,NULL,'system','retention.purge','organization',$2,'allowed',$3)`,
+        [auditId, organizationId, { before: before.toISOString(), phase: 'started' }],
+      )
       const devices = await transaction.query(`DELETE FROM notification_devices WHERE organization_id=$1 AND updated_at < $2::timestamptz - ($3::text || ' days')::interval`, [organizationId, now, policy.rows[0].session_days])
       const sessions = await transaction.query(`DELETE FROM browser_sessions WHERE organization_id=$1 AND COALESCE(revoked_at,absolute_expires_at) < $2::timestamptz - ($3::text || ' days')::interval`, [organizationId, now, policy.rows[0].session_days])
-      return { sessionDays: policy.rows[0].session_days, sessions: sessions.rowCount ?? 0, devices: devices.rowCount ?? 0 }
+      return { auditId, before, runtimeUnitId: policy.rows[0].runtime_unit_id, sessions: sessions.rowCount ?? 0, devices: devices.rowCount ?? 0 }
     })
-    const before = new Date(now.getTime() - controlPlane.sessionDays * 24 * 60 * 60 * 1000)
-    const hostSessions = this.hostData ? (await this.hostData.purgeOrganizationSessions({ organizationId, before })).sessions : 0
+    let hostSessions = 0
+    try {
+      hostSessions = this.hostData ? (await this.hostData.purgeOrganizationSessions({ organizationId, runtimeUnitId: controlPlane.runtimeUnitId, before: controlPlane.before })).sessions : 0
+    } catch (error) {
+      await this.database.query('UPDATE audit_events SET result=$2,metadata=$3 WHERE id=$1', [controlPlane.auditId, 'failed', { before: controlPlane.before.toISOString(), phase: 'host_failed' }]).catch(() => undefined)
+      throw error
+    }
     const result = { sessions: controlPlane.sessions, devices: controlPlane.devices, hostSessions }
-    await this.writePurgeAudit(organizationId, result, before)
+    await this.database.query('UPDATE audit_events SET result=$2,metadata=$3 WHERE id=$1', [controlPlane.auditId, 'succeeded', { before: controlPlane.before.toISOString(), ...result }])
     return result
   }
   async purgeAllOrganizations(now = new Date()): Promise<{ purged: RetentionPurgeResult[]; failures: RetentionPurgeFailure[] }> {
@@ -65,11 +80,30 @@ export class RetentionService {
     return { schemaVersion: 1, exportedAt: new Date().toISOString(), organization: organization.rows[0], memberships: members.rows, usage: usage.rows, audit: audit.rows }
   }
 
-  private async writePurgeAudit(organizationId: string, result: { sessions: number; devices: number; hostSessions: number }, before: Date): Promise<void> {
-    await this.database.query(
-      `INSERT INTO audit_events(id,organization_id,actor_principal_id,actor_kind,action,target_type,target_id,result,metadata) VALUES($1,$2,'system','system','retention.purge','organization',$2,'succeeded',$3)`,
-      [randomUUID(), organizationId, { before: before.toISOString(), ...result }],
-    )
+}
+
+export function createRuntimeHostRetentionClient(options: {
+  origin: string
+  ingressSecret: string
+  tls?: { ca: string | Buffer; cert: string | Buffer; key: string | Buffer; servername?: string }
+}): { purgeOrganizationSessions(params: { organizationId: string; runtimeUnitId: string; before: Date }): Promise<{ sessions: number }> } {
+  return {
+    async purgeOrganizationSessions(params) {
+      const response = await requestRuntime(
+        options.origin,
+        '/internal/retention/sessions',
+        'POST',
+        { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': options.ingressSecret },
+        Buffer.from(JSON.stringify({ organizationId: params.organizationId, unitId: params.runtimeUnitId, before: params.before.toISOString() })),
+        options.tls,
+      )
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Runtime Host retention failed: ${response.status} ${response.body.toString('utf8')}`)
+      }
+      const result = JSON.parse(response.body.toString('utf8')) as { sessions?: unknown }
+      if (!Number.isSafeInteger(result.sessions) || Number(result.sessions) < 0) throw new Error('Runtime Host retention returned an invalid response')
+      return { sessions: Number(result.sessions) }
+    },
   }
 }
 
