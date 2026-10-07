@@ -28,7 +28,7 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve, join, sep } from 'node:path'
 import process from 'node:process'
 
@@ -654,8 +654,13 @@ function scheduleWindowsSelfRemoval(installDir: string): void {
   const script = join(tmpdir(), `kala-executor-uninstall-${process.pid}.ps1`)
   const status = join(tmpdir(), `kala-executor-uninstall-${process.pid}.status`)
   writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script,[string]$Status)\n[IO.File]::WriteAllText($Status, 'started')\n$ErrorActionPreference='Stop'\ntry {\n  $deadline=(Get-Date).AddSeconds(60)\n  while (Get-Process -Id $OwnerPid -ErrorAction SilentlyContinue) {\n    [IO.File]::WriteAllText($Status, 'waiting-for-parent')\n    if ((Get-Date) -ge $deadline) { throw 'owner_timeout' }\n    Start-Sleep -Milliseconds 100\n  }\n  [IO.File]::WriteAllText($Status, 'deleting')\n  for ($attempt=0; $attempt -lt 100; $attempt++) {\n    try { Remove-Item -LiteralPath $Target -Recurse -Force -ErrorAction Stop; break }\n    catch { if ($attempt -eq 99) { throw }; Start-Sleep -Milliseconds 200 }\n  }\n  [IO.File]::WriteAllText($Status, 'removed')\n  Remove-Item -LiteralPath $Script -Force\n} catch {\n  [IO.File]::WriteAllText($Status, ('failed:' + $_.Exception.GetType().Name))\n  exit 1\n}\n`, { mode: 0o600 })
-  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script, status], { detached: true, windowsHide: true, stdio: 'ignore' })
-  child.unref()
+  const errorLog = openSync(join(tmpdir(), `kala-executor-uninstall-${process.pid}.err`), 'w', 0o600)
+  try {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script, status], { detached: true, windowsHide: true, stdio: ['ignore', 'ignore', errorLog] })
+    child.unref()
+  } finally {
+    closeSync(errorLog)
+  }
 }
 
 main().catch((err) => {

@@ -210,9 +210,13 @@ async function verifyExecutorLifecycle() {
           `$tokens=$null;$parseErrors=$null;[System.Management.Automation.Language.Parser]::ParseFile('${safePath}',[ref]$tokens,[ref]$parseErrors)|Out-Null;foreach($entry in $parseErrors){Write-Output ($entry.ErrorId + ':line-' + $entry.Extent.StartLineNumber)}`])
         syntaxErrors = parsed.code === 0 ? (parsed.stdout.trim() || 'none') : 'parser-failed'
       }
-      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
+      const errorPath = join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`)
+      const helperError = existsSync(errorPath) ? readFileSync(errorPath, 'utf8') : ''
+      const errorKinds = ['ParameterBindingException', 'UnauthorizedAccessException', 'ParserError', 'CommandNotFoundException', 'IOException', 'MethodException', 'ArgumentException'].filter((kind) => helperError.includes(kind))
+      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; syntaxErrors=${syntaxErrors}; helperErrorBytes=${Buffer.byteLength(helperError)}; helperErrorKinds=${errorKinds.join(',') || 'none'}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
     }
     rmSync(removalStatus, { force: true })
+    rmSync(join(tmpdir(), `kala-executor-uninstall-${uninstall.pid}.err`), { force: true })
   }
   console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
 }
