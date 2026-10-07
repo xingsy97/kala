@@ -75,7 +75,7 @@ import type {
   DeleteOverflowSession,
   ManualModelInput,
   ManualProviderInput,
-  SessionPreferences,
+  SessionPreferencesPatch,
 } from '../protocol.js'
 import { ApprovalModeSchema, MessageContentSchema } from './kernel.js'
 
@@ -99,7 +99,8 @@ export const SessionPreferencesSchema = z.object({
   toolCardMode: z.enum(['dots', 'standard']).optional(),
   transcriptViewStart: z.number().int().nonnegative().max(10_000_000).optional(),
   rightPanelTab: z.enum(['files', 'git', 'terminal', 'inspector', 'scheduledTasks']).optional(),
-}) satisfies z.ZodType<SessionPreferences>
+  chapterReadingMode: z.enum(['chapters', 'continuous']).nullable().optional(),
+}) satisfies z.ZodType<SessionPreferencesPatch>
 
 const OperationIdSchema = z.string().min(1).max(128).optional()
 

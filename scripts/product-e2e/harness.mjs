@@ -325,8 +325,10 @@ export function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex')
 }
 
-export async function loginWithPassword(page, { productOrigin, loginName, password }) {
-  await page.goto(`${productOrigin}/auth/login`, { waitUntil: 'domcontentloaded' })
+export async function loginWithPassword(page, { productOrigin, loginName, password, loginUrl = `${productOrigin}/auth/login` }) {
+  const start = new URL(loginUrl)
+  if (start.origin !== new URL(productOrigin).origin || start.pathname !== '/auth/login') throw new Error('login URL must be on the product authentication endpoint')
+  await page.goto(start.href, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('input[name=loginName]')
   // ZITADEL's login app hydrates after the input first appears and can replace
   // that node once. Wait for hydration before entering credentials.
@@ -356,7 +358,13 @@ export async function loginWithPassword(page, { productOrigin, loginName, passwo
     })
     await clickElement(submit, 'password change submit')
   }
-  await page.waitForSelector('[data-testid=app-shell-nav]')
+  // The simple-chat layout has no app-shell-nav. Verify the actual authenticated
+  // session instead of depending on one of the possible dashboard layouts.
+  await page.waitForFunction(async (origin) => {
+    if (location.origin !== new URL(origin).origin) return false
+    const response = await fetch('/auth/me')
+    return response.ok && (await response.json()).authenticated === true
+  }, { timeout: 45_000 }, productOrigin)
   return effectivePassword
 }
 

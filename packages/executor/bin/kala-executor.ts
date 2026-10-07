@@ -42,7 +42,7 @@ import { applyManagedUpdate, rollbackManagedUpdate } from '../src/update-runtime
 import { installManagedGeneration, managedInstallSourceExecutable } from '../src/managed-install.js'
 import { startUpdateControlServer } from '../src/update-control.js'
 import { executorReleaseVersion } from '../src/build-info.js'
-import { loadExecutorToken, saveExecutorToken } from '../src/executor-token.js'
+import { hashExecutorInviteRoute, loadExecutorRouteHint, loadExecutorToken, saveExecutorRouteHint, saveExecutorToken } from '../src/executor-token.js'
 import { readPairingJson } from '../src/pairing-response.js'
 import { readExecutorCredential, readExecutorRuntimeConfig } from '../src/executor-config.js'
 import { parseSandboxRootsEnv } from '../src/sandbox-roots-env.js'
@@ -429,7 +429,11 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   const managedCredential = managed ? readExecutorCredential(managed.credentialFile) : undefined
   const invite = args.invite ?? (managedCredential?.startsWith('ak_invite_') ? managedCredential : undefined) ?? process.env.EXECUTOR_INVITE
   const profile = normalizeExecutorProfile(args.profile ?? managed?.profile ?? process.env.KALA_EXECUTOR_PROFILE)
-  const token = args.token ?? (managedCredential?.startsWith('ak_exec_') ? managedCredential : undefined) ?? process.env.EXECUTOR_TOKEN ?? (invite ? undefined : loadExecutorToken(undefined, profile))
+  const token = args.token ?? (managedCredential?.startsWith('ak_exec_') ? managedCredential : undefined) ?? process.env.EXECUTOR_TOKEN ?? loadExecutorToken(undefined, profile)
+  const routeHint = invite ? hashExecutorInviteRoute(invite) : token ? loadExecutorRouteHint(profile) : undefined
+  // Previously enrolled Executors already have a device token, so Host does not issue
+  // another welcome. Preserve their invite's routing hint before the first reconnect.
+  if (invite && token) saveExecutorRouteHint(invite, profile)
   const executorId = args.id ?? process.env.EXECUTOR_ID
   const autoUpdate = args.autoUpdate === true || process.env.KALA_AUTO_UPDATE === '1'
   const noUpdateCheck = args.noUpdateCheck === true || process.env.KALA_NO_UPDATE_CHECK === '1'
@@ -519,6 +523,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
     ...(pairingToken !== undefined ? { token: pairingToken } : {}),
     ...(invite !== undefined ? { invite } : {}),
+    ...(routeHint !== undefined ? { routeHint } : {}),
     ...(executorId !== undefined ? { executorId } : {}),
     ...(managed?.installationId ? { installId: managed.installationId } : {}),
     ...(mcpServers.length > 0 ? { mcpServers } : {}),
@@ -526,6 +531,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
     logger,
     onToken(nextToken) {
       saveExecutorToken(nextToken, undefined, profile)
+      if (invite) saveExecutorRouteHint(invite, profile)
       logger.info('executor identity saved for future reconnects')
     },
   })

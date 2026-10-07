@@ -6,6 +6,8 @@ import { parseTenantRuntimeUnitId, type TenantRuntimeUnitId } from './unit.js'
 export type RuntimeUnitMaterialization = {
   schemaVersion: 1
   unitId: TenantRuntimeUnitId
+  /** Trusted tenant binding established by an authenticated lifecycle command. */
+  organizationId?: string
   routingKeyDigest: string
   routingKeyVersion: number
   generation: number

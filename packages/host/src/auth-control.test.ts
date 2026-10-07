@@ -38,6 +38,10 @@ describe('auth-control', () => {
       { role: 'executor', clientVersion: '0.1.0', token: 'legacy-token' },
       { executorIdentityStore: store },
     )).not.toHaveProperty('installId')
+    expect(authenticateExecutorToken(
+      { role: 'executor', clientVersion: '0.1.0', token: 'bound-token', invite: 'synthetic-expired-invite-for-test-only' },
+      { executorIdentityStore: store },
+    )).toMatchObject({ accepted: true, workspaceId: 'ws-bound', token: 'bound-token' })
   })
 
   it('rejects unknown executor tokens when scopes are configured', () => {

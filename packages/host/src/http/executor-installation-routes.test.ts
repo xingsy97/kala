@@ -144,7 +144,12 @@ describe('executor installation routes', () => {
     expect((await fetch(`${dedicated.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' }) })).status).toBe(201)
     const privateCloud = await start('multi-tenant')
     const body = JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' })
-    expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).status).toBe(403)
+    const anonymous = await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+    expect(anonymous.status).toBe(403)
+    await expect(anonymous.json()).resolves.toEqual({ error: 'admin_required' })
+    const member = await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'member' }, body })
+    expect(member.status).toBe(403)
+    await expect(member.json()).resolves.toEqual({ error: 'admin_required' })
     expect((await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }, body })).status).toBe(201)
   })
 

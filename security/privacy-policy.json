@@ -14,7 +14,8 @@
     "example.com",
     "example.org",
     "example.net",
-    "users.noreply.github.com"
+    "users.noreply.github.com",
+    "zitadel.localhost"
   ],
   "allowedUuidPrefixes": [
     "123e4567-e89b-42d3-a456-42661417",
@@ -186,6 +187,8 @@
     "dashboard",
     "host",
     "host-machine",
+    "identity-proxy",
+    "identity-zitadel",
     "mock-llm",
     "orchestrator",
     "origin",
@@ -195,6 +198,7 @@
     "runtime-host",
     "stable-ingress",
     "test",
+    "unit",
     "x",
     "zitadel"
   ],

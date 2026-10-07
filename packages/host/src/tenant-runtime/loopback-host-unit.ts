@@ -65,6 +65,7 @@ export async function startLoopbackHostRuntimeUnit(
     origin: `http://127.0.0.1:${server.port}`,
     server,
     ...(executor ? { executor } : {}),
+    purgeOrganizationSessions: async (params) => await server.store.purgeOrganizationSessions(params),
     async drain() {
       if (closed || state === 'draining') return
       state = 'draining'

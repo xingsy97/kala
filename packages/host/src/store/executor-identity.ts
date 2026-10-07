@@ -142,7 +142,7 @@ export class ExecutorIdentityStore {
   consumeInvite(inviteToken: string | undefined, workspaceId: string, label?: string): { ok: true; token: string } | { ok: false; reason: string } {
     if (!inviteToken) return { ok: false, reason: 'missing_invite' }
     const invite = this.findInviteByToken(inviteToken)
-    if (!invite || invite.revoked) return { ok: false, reason: 'invalid_invite' }
+    if (!invite || invite.revoked || invite.lastUsedAt) return { ok: false, reason: 'invalid_invite' }
     if (Date.parse(invite.expiresAt) <= Date.now()) return { ok: false, reason: 'invite_expired' }
     if (invite.workspaceId && invite.workspaceId !== workspaceId) return { ok: false, reason: 'workspace_identity_mismatch' }
     invite.workspaceId = workspaceId

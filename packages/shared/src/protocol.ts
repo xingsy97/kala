@@ -243,18 +243,25 @@ export type SessionReadyEvent = {
  */
 export type ToolCardMode = 'dots' | 'standard'
 export type RightPanelTab = 'files' | 'git' | 'terminal' | 'inspector' | 'scheduledTasks'
+export type ChapterReadingMode = 'chapters' | 'continuous'
 
 export type SessionPreferences = {
   selectedModel?: string
   toolCardMode?: ToolCardMode
   transcriptViewStart?: number
   rightPanelTab?: RightPanelTab
+  chapterReadingMode?: ChapterReadingMode
+}
+
+/** Null clears the Session override; omitted keys stay unchanged. */
+export type SessionPreferencesPatch = Omit<SessionPreferences, 'chapterReadingMode'> & {
+  chapterReadingMode?: ChapterReadingMode | null
 }
 
 export type ClientUpdatePreferences = {
   operationId?: string
   sessionId: string
-  preferences: SessionPreferences
+  preferences: SessionPreferencesPatch
 }
 
 // ============================================================================

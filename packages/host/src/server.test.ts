@@ -13,6 +13,7 @@ import type { AgentConfig } from '@agent-kernel/kernel'
 import type {
   ControlUpdate,
   DashboardServerToClientEvents,
+  ClientUpdatePreferences,
   ClientListDirs,
   DirListResult,
   DashboardClientToServerEvents,
@@ -313,6 +314,9 @@ describe('wire protocol', () => {
 
   afterEach(async () => {
     await server.close()
+    // Closing sockets does not wait for already dispatched Agent turns to finish
+    // their durable writes; keep the temporary Session directory until they do.
+    await server.loop.waitForQuiescence()
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1124,6 +1128,54 @@ describe('wire protocol', () => {
     dashboard.close()
   })
 
+  it('persists chapter reading mode updates, broadcasts them across clients, and rejects invalid modes', async () => {
+    const sessionId = 'chapter-reading-mode-update'
+    await server.store.ensure({ sessionId, defaultConfig: config })
+    const connectDashboard = async (): Promise<ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents>> => {
+      const socket: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+        transports: ['websocket'],
+        auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+        reconnection: false,
+      })
+      await new Promise<SessionReadyEvent>((resolve) => socket.on('session:ready', resolve))
+      return socket
+    }
+    const first = await connectDashboard()
+    const second = await connectDashboard()
+    const changed = new Promise<void>((resolve) => second.on('server:control_update', (payload) => {
+      if (payload.kind === 'session_meta_changed' && payload.sessionId === sessionId && payload.preferences?.chapterReadingMode === 'continuous') resolve()
+    }))
+
+    const ack = await first.timeout(1_000).emitWithAck('client:update_preferences', {
+      operationId: 'chapter-reading-mode-valid',
+      sessionId,
+      preferences: { chapterReadingMode: 'continuous' },
+    })
+    expect(ack).toEqual({ ok: true })
+    await changed
+    expect(server.store.get(sessionId)?.preferences.chapterReadingMode).toBe('continuous')
+
+    const invalid = {
+      operationId: 'chapter-reading-mode-invalid',
+      sessionId,
+      preferences: { chapterReadingMode: 'pages' },
+    } as unknown as ClientUpdatePreferences
+    const invalidAck = await first.timeout(1_000).emitWithAck('client:update_preferences', invalid)
+    expect(invalidAck).toEqual({ ok: false, error: 'invalid preferences update' })
+    expect(server.store.get(sessionId)?.preferences.chapterReadingMode).toBe('continuous')
+    expect((await readSessionLog(server.store.get(sessionId)!.logPath)).metadata.at(-1)?.chapterReadingMode).toBe('continuous')
+    const reset = await first.timeout(1_000).emitWithAck('client:update_preferences', {
+      operationId: 'chapter-reading-mode-follow-global',
+      sessionId,
+      preferences: { chapterReadingMode: null },
+    })
+    expect(reset).toEqual({ ok: true })
+    expect(server.store.get(sessionId)?.preferences.chapterReadingMode).toBeUndefined()
+    expect((await readSessionLog(server.store.get(sessionId)!.logPath)).metadata.at(-1)?.chapterReadingMode).toBeNull()
+    first.close()
+    second.close()
+  })
+
   it('rejects disallowed tenant model preference updates without persisting them', async () => {
     await server.close()
     server = await startHostServer({
@@ -1532,6 +1584,10 @@ describe('wire protocol', () => {
       dashboard.emit('client:subscribe_channels', { requestId: 'queue-check', generation: 1, channels: [`session:${sessionId}`] }, () => {})
     })
     expect(queue.items?.[0]?.content?.filter((block) => block.type === 'image')).toHaveLength(2)
+    // The queue acknowledgement can precede dispatch scheduling and its durable write.
+    // Let that dispatch enter the loop before teardown removes the temporary store.
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await server.loop.waitForQuiescence()
     dashboard.close()
   })
 
@@ -3098,7 +3154,7 @@ describe('wire protocol', () => {
     executor.close()
   })
 
-  it('allows invite reuse for the bound workspace and rejects a different workspace', async () => {
+  it('rejects invite replay even for the bound workspace while allowing device token reconnect', async () => {
     await server.close()
     const identityPath = join(dir, 'executor-identities.json')
     const identityStore = new ExecutorIdentityStore(identityPath)
@@ -3129,12 +3185,23 @@ describe('wire protocol', () => {
     }
 
     const first = await announceWithInvite('exec-reuse-1', 'ws-reuse')
-    await new Promise<{ token: string; workspaceId: string }>((resolve) => first.on('executor:welcome', resolve))
+    const welcome = await new Promise<{ token: string; workspaceId: string }>((resolve) => first.on('executor:welcome', resolve))
     first.close()
 
     const second = await announceWithInvite('exec-reuse-2', 'ws-reuse')
-    await expect(new Promise<{ token: string; workspaceId: string }>((resolve) => second.on('executor:welcome', resolve))).resolves.toMatchObject({ workspaceId: 'ws-reuse' })
+    await expect(new Promise<{ code: string }>((resolve) => second.on('executor:host_reject', resolve))).resolves.toMatchObject({ code: 'auth_failed' })
     second.close()
+
+    const reconnect: ClientSocket<ExecutorServerToClientEvents, ExecutorClientToServerEvents> = clientIO(`${url}/executor`, {
+      transports: ['websocket'],
+      auth: { role: 'executor', clientVersion: PROTOCOL_VERSION, token: welcome.token, invite: invite.inviteToken },
+      reconnection: false,
+    })
+    await new Promise<void>((resolve) => reconnect.on('connect', resolve))
+    reconnect.emit('executor:announce', { executorId: 'exec-reuse-1', workspaceId: 'ws-reuse', workspaceName: 'ws-reuse', tools: ['bash'], runtime: 'node', runtimeVersion: 'test' })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(reconnect.connected).toBe(true)
+    reconnect.close()
 
     const wrong = await announceWithInvite('exec-reuse-3', 'ws-other')
     await expect(new Promise<{ code: string }>((resolve) => wrong.on('executor:host_reject', resolve))).resolves.toMatchObject({ code: 'auth_failed' })

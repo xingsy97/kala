@@ -102,6 +102,12 @@ import {
 } from './executor.js'
 import { ManualModelInputSchema, SessionPreferencesSchema } from './dashboard-inbound.js'
 
+// A null reading mode is only an inbound clear command; persisted summaries
+// and control-plane updates expose the resulting preference, never the command.
+const StoredSessionPreferencesSchema = SessionPreferencesSchema.extend({
+  chapterReadingMode: z.enum(['chapters', 'continuous']).optional(),
+})
+
 void ToolProgressPayloadSchema
 void ServerBgTaskEvictedSchema
 
@@ -430,7 +436,7 @@ export const ServerTokenDeltaEventSchema = z.object({
 export const SessionMetaChangedSchema = z.object({
   sessionId: z.string(),
   label: z.string().optional(),
-  preferences: SessionPreferencesSchema.optional(),
+  preferences: StoredSessionPreferencesSchema.optional(),
 }) satisfies z.ZodType<SessionMetaChanged>
 
 export const WorkspaceMetaChangedSchema = z.object({
@@ -516,7 +522,7 @@ export const SessionSummarySchema = z.object({
   currentCwd: z.string().optional(),
   firstUserMessage: z.string().optional(),
   label: z.string().optional(),
-  preferences: SessionPreferencesSchema.optional(),
+  preferences: StoredSessionPreferencesSchema.optional(),
 }) satisfies z.ZodType<SessionSummary>
 
 // ============================================================================
@@ -1171,6 +1177,7 @@ export const MetadataEntrySchema = z.object({
   toolCardMode: z.enum(['dots', 'standard']).optional(),
   transcriptViewStart: z.number().int().nonnegative().max(10_000_000).optional(),
   rightPanelTab: z.enum(['files', 'git', 'terminal', 'inspector', 'scheduledTasks']).optional(),
+  chapterReadingMode: z.enum(['chapters', 'continuous']).nullable().optional(),
 }) satisfies z.ZodType<MetadataEntry>
 
 export const RuntimeMetadataEntrySchema = z.object({

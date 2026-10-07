@@ -79,9 +79,11 @@ export function authenticateExecutorToken(
   config: AuthConfig | undefined,
 ): ExecutorIdentity {
   const token = auth?.token
-  if (auth?.invite) return { accepted: true, inviteToken: auth.invite }
+  // After initial enrollment the Executor retains its route hint, but its
+  // durable device credential must take precedence over an expired invite.
   const stored = config?.executorIdentityStore?.resolveToken(token)
   if (stored) return { accepted: true, workspaceId: stored.workspaceId, ...(stored.installId ? { installId: stored.installId } : {}), ...(stored.label ? { label: stored.label } : {}), ...(token ? { token } : {}) }
+  if (auth?.invite) return { accepted: true, inviteToken: auth.invite }
   const scoped = config?.executorTokens ?? []
   if (scoped.length > 0) {
     const match = scoped.find((entry) => token !== undefined && safeEqual(entry.token, token))

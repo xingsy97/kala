@@ -22,6 +22,7 @@ export interface TenantRuntimeUnit {
   readonly id: TenantRuntimeUnitId
   readonly state: TenantRuntimeUnitState
   readonly origin: string
+  purgeOrganizationSessions?(params: { organizationId: string; before: Date }): Promise<{ sessions: number; sessionIds: string[] }>
   drain(): Promise<void>
   close(): Promise<void>
 }

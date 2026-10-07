@@ -209,6 +209,18 @@ describe('wire contract — rejection cases', () => {
     }).success).toBe(false)
   })
 
+  it('accepts supported chapter reading modes and rejects unknown modes', () => {
+    expect(schema.ClientUpdatePreferencesSchema.safeParse({
+      sessionId: 's', preferences: { chapterReadingMode: 'chapters' },
+    }).success).toBe(true)
+    expect(schema.ClientUpdatePreferencesSchema.safeParse({
+      sessionId: 's', preferences: { chapterReadingMode: 'continuous' },
+    }).success).toBe(true)
+    expect(schema.ClientUpdatePreferencesSchema.safeParse({
+      sessionId: 's', preferences: { chapterReadingMode: 'pages' },
+    }).success).toBe(false)
+  })
+
   it('rejects ExecutorAnnounce missing workspaceId', () => {
     // Regression: previously fixtures omitted workspaceId and slipped through.
     // The wire schema is authoritative — enforce it here so a future refactor

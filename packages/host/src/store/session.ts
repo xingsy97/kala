@@ -629,6 +629,9 @@ export class SessionStore {
     if (record.preferences.rightPanelTab) {
       await appendMetadataEntry(record.logPath, { rightPanelTab: record.preferences.rightPanelTab })
     }
+    if (record.preferences.chapterReadingMode) {
+      await appendMetadataEntry(record.logPath, { chapterReadingMode: record.preferences.chapterReadingMode })
+    }
     this.records.set(sessionId, record)
     this.summaryCache.delete(logPath)
     this.notifyStorageChanged(sessionId)
@@ -669,7 +672,7 @@ export class SessionStore {
     ;(rec as { config: AgentConfig }).config = update(rec.config)
   }
 
-  async updatePreferences(sessionId: string, patch: SessionPreferences): Promise<SessionPreferences> {
+  async updatePreferences(sessionId: string, patch: import('@agent-kernel/shared').SessionPreferencesPatch): Promise<SessionPreferences> {
     const rec = this.records.get(sessionId) ?? (await this.load(sessionId))
     this.assertStorageWritable(sessionId)
     const next: SessionPreferences = { ...rec.preferences }
@@ -695,6 +698,11 @@ export class SessionStore {
       else next.rightPanelTab = patch.rightPanelTab
       changed = true
     }
+    if ('chapterReadingMode' in patch) {
+      if (patch.chapterReadingMode == null) delete next.chapterReadingMode
+      else next.chapterReadingMode = patch.chapterReadingMode
+      changed = true
+    }
     if (changed) {
       await this.runAuxiliaryStorageWrite(sessionId, async () => {
         rec.preferences = next
@@ -703,6 +711,7 @@ export class SessionStore {
           ...('toolCardMode' in patch && next.toolCardMode ? { toolCardMode: next.toolCardMode } : {}),
           ...('transcriptViewStart' in patch && next.transcriptViewStart !== undefined ? { transcriptViewStart: next.transcriptViewStart } : {}),
           ...('rightPanelTab' in patch && next.rightPanelTab ? { rightPanelTab: next.rightPanelTab } : {}),
+          ...('chapterReadingMode' in patch ? { chapterReadingMode: next.chapterReadingMode ?? null } : {}),
         })
       })
       this.summaryCache.delete(rec.logPath)
@@ -1277,7 +1286,7 @@ export class SessionStore {
   }
 
   async delete(sessionId: string): Promise<void> {
-    await this.runAuxiliaryStorageWrite(sessionId, async () => await this.deleteUnlocked(sessionId))
+    await this.withStorageMutationLease([sessionId], async () => await this.deleteUnlocked(sessionId))
   }
 
   private async deleteUnlocked(sessionId: string): Promise<void> {
@@ -1289,15 +1298,9 @@ export class SessionStore {
         if (entry.endsWith(`_${sessionId}`)) artifactSlugs.add(entry)
       }
     }
-    this.records.delete(sessionId)
-    this.inFlight.delete(sessionId)
-    this.runtimeRecoveries.delete(sessionId)
-    this.locallyProjectedExternalSessions.delete(sessionId)
-    this.recordTails.delete(sessionId)
     for (const path of paths) {
       this.summaryCache.delete(path)
       this.summaryLoads.delete(path)
-      await rm(path, { force: true })
       await rm(snapshotSidecarPath(path), { force: true })
       await rm(summaryCachePath(path), { force: true })
       await rm(runtimeContextCachePath(path), { force: true })
@@ -1312,6 +1315,16 @@ export class SessionStore {
       }
     }
     await this.options.deleteRegisteredArtifacts?.(sessionId)
+    // Keep the discoverable JSONL source of truth until every auxiliary and
+    // registered artifact has been removed. A failure before this point can
+    // then be retried after a process restart instead of leaving an orphan
+    // that no subsequent retention scan can attribute to a Session.
+    for (const path of paths) await rm(path, { force: true })
+    this.records.delete(sessionId)
+    this.inFlight.delete(sessionId)
+    this.runtimeRecoveries.delete(sessionId)
+    this.locallyProjectedExternalSessions.delete(sessionId)
+    this.recordTails.delete(sessionId)
     this.notifyStorageChanged(sessionId)
   }
 
@@ -1358,7 +1371,7 @@ export class SessionStore {
     if (cutoffMs !== undefined && !Number.isFinite(cutoffMs)) throw new Error('invalid retention cutoff')
     const candidates = new Map<string, SessionRecord>()
     for (const record of this.records.values()) {
-      if (record.organizationId === organizationId && sessionOlderThan(record, cutoffMs)) candidates.set(record.sessionId, record)
+      if (record.organizationId === organizationId && sessionEligibleForRetention(record, cutoffMs)) candidates.set(record.sessionId, record)
     }
     if (existsSync(this.sessionsDir)) {
       for (const file of readdirSync(this.sessionsDir)) {
@@ -1368,15 +1381,25 @@ export class SessionStore {
         try {
           const header = await readSessionHeader(path)
           const record = await this.loadFromFile(header.sessionId, path, { recoverDangling: false })
-          if (record.organizationId === organizationId && sessionOlderThan(record, cutoffMs)) candidates.set(record.sessionId, record)
+          if (record.organizationId === organizationId && sessionEligibleForRetention(record, cutoffMs)) candidates.set(record.sessionId, record)
         } catch {
           // Malformed logs are quarantined from tenant purge rather than being
           // guessed into another tenant's deletion set.
         }
       }
     }
-    const sessionIds = [...candidates.keys()].sort()
-    for (const sessionId of sessionIds) await this.delete(sessionId)
+    const sessionIds: string[] = []
+    for (const [sessionId, candidate] of [...candidates.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      const deleted = await this.withStorageMutationLease([sessionId], async () => {
+        // The lease blocks new writes and waits for every already-enqueued
+        // mutation. Rechecking inside it closes the scan/delete TOCTOU window.
+        const current = this.records.get(sessionId) ?? candidate
+        if (current.organizationId !== organizationId || !sessionEligibleForRetention(current, cutoffMs)) return false
+        await this.deleteUnlocked(sessionId)
+        return true
+      })
+      if (deleted) sessionIds.push(sessionId)
+    }
     return { sessions: sessionIds.length, sessionIds }
   }
 
@@ -1819,6 +1842,10 @@ export class SessionStore {
       persistedSummary?.summary.preferences?.transcriptViewStart
     const rightPanelTab = latestRightPanelTabFromMetadata(parsed.metadata) ??
       persistedSummary?.summary.preferences?.rightPanelTab
+    const chapterReadingModePatch = latestChapterReadingModePatchFromMetadata(parsed.metadata)
+    const chapterReadingMode = chapterReadingModePatch.found
+      ? chapterReadingModePatch.value
+      : persistedSummary?.summary.preferences?.chapterReadingMode
     const preferences: SessionPreferences = {
       ...(selectedModel
         ? { selectedModel }
@@ -1826,6 +1853,7 @@ export class SessionStore {
       ...(toolCardMode ? { toolCardMode } : {}),
       ...(transcriptViewStart !== undefined ? { transcriptViewStart } : {}),
       ...(rightPanelTab ? { rightPanelTab } : {}),
+      ...(chapterReadingMode ? { chapterReadingMode } : {}),
     }
 
     const record: SessionRecord = {
@@ -2039,7 +2067,10 @@ function summarizeRecord(record: SessionRecord): SessionSummary {
   }
 }
 
-function sessionOlderThan(record: SessionRecord, cutoffMs: number | undefined): boolean {
+function sessionEligibleForRetention(record: SessionRecord, cutoffMs: number | undefined): boolean {
+  // These states can own live model/tool work or a pending human decision.
+  // A stale activity timestamp is not permission to interrupt that work.
+  if (record.state.status === 'thinking' || record.state.status === 'awaiting_approval' || record.state.status === 'executing_tools') return false
   if (cutoffMs === undefined) return true
   const activity = Date.parse(record.lastEventAt ?? record.createdAt)
   return Number.isFinite(activity) && activity < cutoffMs
@@ -2139,6 +2170,7 @@ function summarizeLog(
   const toolCardMode = latestToolCardModeFromMetadata(parsed.metadata)
   const transcriptViewStart = latestTranscriptViewStartFromMetadata(parsed.metadata)
   const rightPanelTab = latestRightPanelTabFromMetadata(parsed.metadata)
+  const chapterReadingMode = latestChapterReadingModePatchFromMetadata(parsed.metadata).value
   const workspaceId =
     latestStringFromMetadata(parsed.metadata, 'workspaceId') ?? header.workspaceId
   const workspaceName =
@@ -2175,12 +2207,13 @@ function summarizeLog(
       ? { firstUserMessage: firstUserText.slice(0, 120) }
       : {}),
     ...(label ? { label } : {}),
-    ...(selectedModel || toolCardMode || transcriptViewStart !== undefined || rightPanelTab
+    ...(selectedModel || toolCardMode || transcriptViewStart !== undefined || rightPanelTab || chapterReadingMode
       ? { preferences: {
           ...(selectedModel ? { selectedModel } : {}),
           ...(toolCardMode ? { toolCardMode } : {}),
           ...(transcriptViewStart !== undefined ? { transcriptViewStart } : {}),
           ...(rightPanelTab ? { rightPanelTab } : {}),
+          ...(chapterReadingMode ? { chapterReadingMode } : {}),
         } }
       : {}),
   }
@@ -2259,6 +2292,19 @@ function latestRightPanelTabFromMetadata(
   return undefined
 }
 
+function latestChapterReadingModePatchFromMetadata(
+  metadata: readonly MetadataEntry[],
+): { found: boolean; value: SessionPreferences['chapterReadingMode'] } {
+  for (let i = metadata.length - 1; i >= 0; i -= 1) {
+    const entry = metadata[i]!
+    if (!('chapterReadingMode' in entry)) continue
+    const value = entry.chapterReadingMode
+    if (value === null) return { found: true, value: undefined }
+    if (value === 'chapters' || value === 'continuous') return { found: true, value }
+  }
+  return { found: false, value: undefined }
+}
+
 function normalizedPreferences(preferences: SessionPreferences | undefined): SessionPreferences {
   const selectedModel = normalizePreferenceString(preferences?.selectedModel)
   const transcriptViewStart = preferences?.transcriptViewStart
@@ -2269,6 +2315,7 @@ function normalizedPreferences(preferences: SessionPreferences | undefined): Ses
       ? { transcriptViewStart }
       : {}),
     ...(preferences?.rightPanelTab ? { rightPanelTab: preferences.rightPanelTab } : {}),
+    ...(preferences?.chapterReadingMode ? { chapterReadingMode: preferences.chapterReadingMode } : {}),
   }
 }
 

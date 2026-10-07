@@ -249,6 +249,8 @@ export type MetadataEntry = {
   toolCardMode?: import('./protocol.js').ToolCardMode
   transcriptViewStart?: number
   rightPanelTab?: import('./protocol.js').RightPanelTab
+  /** `null` is an append-only tombstone that clears the per-session override. */
+  chapterReadingMode?: import('./protocol.js').ChapterReadingMode | null
 }
 
 export type RuntimeMetadataEntry = {

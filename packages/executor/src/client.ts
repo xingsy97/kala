@@ -127,6 +127,8 @@ export type ExecutorOptions = {
   sandboxRoots?: readonly string[]
   token?: string
   invite?: string
+  /** One-way invite hash used only to route an already enrolled device. */
+  routeHint?: string
   executorId?: string
   installId?: string
   onToken?(token: string): void
@@ -226,7 +228,7 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
     reconnectionDelayMax: 60_000,   // keep recovery bounded while retaining jitter
     reconnectionAttempts: Infinity,
     randomizationFactor: 0.5,       // +/-50% jitter, avoid thundering-herd reconnect
-    ...(options.invite ? { extraHeaders: { 'x-kala-executor-invite': options.invite } } : {})
+    ...(options.invite || options.routeHint ? { extraHeaders: { ...(options.invite ? { 'x-kala-executor-invite': options.invite } : {}), ...(options.routeHint ? { 'x-kala-executor-route': options.routeHint } : {}) } } : {})
   }) as Socket<ExecutorServerToClientEvents, ExecutorClientToServerEvents>
 
   const inFlight = new Map<string, AbortController>()

@@ -385,7 +385,10 @@ export function configureDashboardNamespace(
     nextFn()
   })
 
-  ns.on('connection', async (socket) => {
+  ns.on('connection', (socket) => {
+    // Socket.IO does not await async connection listeners. Hydration failures
+    // (including disconnects during shutdown) must not become unhandled rejections.
+    void (async () => {
     const auth = socket.handshake.auth as HandshakeAuth
     const multiplexed = Boolean(auth.clientId)
     // Legacy clients bind transport to one Session; multiplexed clients use a control placeholder until subscribing.
@@ -1934,6 +1937,12 @@ export function configureDashboardNamespace(
       ack?.(result)
       if (!result.ok) deps.broadcastError(p.sessionId, 'host', result.error)
     })
+    })().catch((error: unknown) => {
+      if (!socket.connected) return
+      const auth = socket.handshake.auth as HandshakeAuth
+      deps.audit?.log({ action: 'dashboard.socket_init_error', actor: auditActor(socket), target: { sessionId: auth.sessionId ?? `control:${auth.clientId}` }, outcome: 'error', error: error instanceof Error ? error.message : String(error) })
+      socket.disconnect(true)
+    })
   })
 }
 
@@ -2101,7 +2110,7 @@ function auditConnectionMeta(meta: ConnectionMeta): Record<string, unknown> {
 async function applyPreferencesUpdate(
   deps: DashboardDeps,
   sessionId: string,
-  patch: import('@agent-kernel/shared').SessionPreferences,
+  patch: import('@agent-kernel/shared').SessionPreferencesPatch,
   actor: AuditActor = { kind: 'anonymous' },
 ): Promise<void> {
   const normalizedPatch = normalizePreferencesPatch(deps, sessionId, patch)
@@ -2179,8 +2188,8 @@ function effectiveDefaultModel(deps: DashboardDeps): string | undefined {
 function normalizePreferencesPatch(
   deps: DashboardDeps,
   sessionId: string,
-  patch: import('@agent-kernel/shared').SessionPreferences,
-): import('@agent-kernel/shared').SessionPreferences | null {
+  patch: import('@agent-kernel/shared').SessionPreferencesPatch,
+): import('@agent-kernel/shared').SessionPreferencesPatch | null {
   if (!('selectedModel' in patch)) return patch
   const selectedModel = patch.selectedModel?.trim()
   if (!selectedModel) return { ...patch, selectedModel: '' }

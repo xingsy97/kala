@@ -19,6 +19,20 @@ import { createInitialState } from '@agent-kernel/kernel'
 const contextWriteTest = vi.hoisted(() => ({
   beforeWrite: undefined as undefined | ((value: unknown) => Promise<void>),
 }))
+const storageDeleteTest = vi.hoisted(() => ({
+  beforeRm: undefined as undefined | ((path: string) => Promise<void>),
+}))
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    async rm(...args: Parameters<typeof actual.rm>) {
+      await storageDeleteTest.beforeRm?.(String(args[0]))
+      return await actual.rm(...args)
+    },
+  }
+})
 
 vi.mock('../tenant-runtime/atomic-json-file.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../tenant-runtime/atomic-json-file.js')>()
@@ -40,6 +54,7 @@ describe('SessionStore.ensure', () => {
   })
   afterEach(() => {
     contextWriteTest.beforeWrite = undefined
+    storageDeleteTest.beforeRm = undefined
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -935,6 +950,96 @@ describe('SessionStore.ensure', () => {
     expect(existsSync(fresh.logPath)).toBe(true)
   })
 
+  it('retention never purges an active session even when its activity is older than the cutoff', async () => {
+    const store = new SessionStore(dir)
+    const active = await store.create({ sessionId: 'tenant-purge-active', config, organizationId: 'org_acme' })
+    ;(active as { lastEventAt?: string }).lastEventAt = '2026-01-01T00:00:00.000Z'
+    active.state.status = 'executing_tools'
+
+    await expect(store.purgeOrganizationSessions({
+      organizationId: 'org_acme',
+      before: new Date('2026-06-01T00:00:00.000Z'),
+    })).resolves.toEqual({ sessions: 0, sessionIds: [] })
+
+    expect(existsSync(active.logPath)).toBe(true)
+  })
+
+  it('waits for an enqueued record and rechecks retention eligibility under the storage lease', async () => {
+    const store = new SessionStore(dir)
+    const record = await store.create({ sessionId: 'tenant-purge-concurrent', config, organizationId: 'org_acme' })
+    ;(record as { lastEventAt?: string }).lastEventAt = '2026-01-01T00:00:00.000Z'
+    let releaseWrite!: () => void
+    const writeBlocker = new Promise<void>((resolve) => { releaseWrite = resolve })
+    ;(store as unknown as { recordTails: Map<string, Promise<void>> }).recordTails.set(record.sessionId, writeBlocker)
+    const event = { kind: 'user_message' as const, text: 'new work' }
+    const transition = step(record.state, event, record.config)
+    const writing = store.record(record.sessionId, event, transition.effects, transition.next)
+
+    const purging = store.purgeOrganizationSessions({
+      organizationId: 'org_acme',
+      before: new Date('2026-06-01T00:00:00.000Z'),
+    })
+    await Promise.resolve()
+    releaseWrite()
+
+    await expect(writing).resolves.toBeUndefined()
+    await expect(purging).resolves.toEqual({ sessions: 0, sessionIds: [] })
+    expect(existsSync(record.logPath)).toBe(true)
+  })
+
+  it('keeps the primary log discoverable and retries every partial deletion step', async () => {
+    const artifactRootDir = join(dir, 'host-artifacts')
+    const request = { organizationId: 'org_acme', before: new Date('2026-06-01T00:00:00.000Z') }
+    const kinds = ['message-assembly', 'router-decisions', 'tool-catalog', 'compaction-summaries', 'subagent-policies']
+    const steps = ['snapshot', 'summary', 'context', 'log-artifacts', ...kinds, 'registered-artifacts', 'primary-log']
+
+    for (const [index, failedStep] of steps.entries()) {
+      const sessionId = `tenant-purge-retry-${index}`
+      let failRegistered = failedStep === 'registered-artifacts'
+      const store = new SessionStore(dir, {
+        artifactRootDir,
+        deleteRegisteredArtifacts: async () => {
+          if (failRegistered) {
+            failRegistered = false
+            throw new Error(`temporary ${failedStep} failure`)
+          }
+        },
+      })
+      const record = await store.create({ sessionId, config, organizationId: 'org_acme' })
+      ;(record as { lastEventAt?: string }).lastEventAt = '2026-01-01T00:00:00.000Z'
+      const paths: Record<string, string> = {
+        snapshot: snapshotSidecarPath(record.logPath),
+        summary: `${record.logPath}.summary.json`,
+        context: `${record.logPath}.context.json`,
+        'log-artifacts': join(dir, 'artifacts', basename(record.logPath, '.jsonl')),
+        'primary-log': record.logPath,
+      }
+      writeFileSync(paths.snapshot!, '{}')
+      writeFileSync(paths.summary!, '{}')
+      writeFileSync(paths.context!, '{}')
+      mkdirSync(paths['log-artifacts']!, { recursive: true })
+      writeFileSync(join(paths['log-artifacts']!, 'request.json'), '{}')
+      for (const kind of kinds) {
+        paths[kind] = join(artifactRootDir, kind, sessionId)
+        mkdirSync(paths[kind]!, { recursive: true })
+        writeFileSync(join(paths[kind]!, '1.json'), '{}')
+      }
+      let failPath = failedStep === 'registered-artifacts' ? undefined : paths[failedStep]
+      storageDeleteTest.beforeRm = async (path) => {
+        if (failPath && path === failPath) {
+          failPath = undefined
+          throw new Error(`temporary ${failedStep} failure`)
+        }
+      }
+
+      await expect(store.purgeOrganizationSessions(request)).rejects.toThrow(`temporary ${failedStep} failure`)
+      expect(existsSync(record.logPath), `${failedStep} must leave the primary log for retry`).toBe(true)
+      storageDeleteTest.beforeRm = undefined
+      await expect(store.purgeOrganizationSessions(request)).resolves.toEqual({ sessions: 1, sessionIds: [sessionId] })
+      expect(existsSync(record.logPath)).toBe(false)
+    }
+  })
+
   it('backfills missing workspace and initial cwd on an existing cached session', async () => {
     const store = new SessionStore(dir)
     const first = await store.ensure({
@@ -1186,6 +1291,35 @@ describe('SessionStore.updatePreferences', () => {
       rightPanelTab: 'terminal',
     })
   })
+
+  it('persists, summarizes, restores, and clears the chapter reading mode override', async () => {
+    const store = new SessionStore(dir)
+    const { record } = await store.ensure({ sessionId: 'sess-chapter-reading-mode', defaultConfig: config })
+    await store.updatePreferences(record.sessionId, { toolCardMode: 'standard' })
+
+    const applied = await store.updatePreferences(record.sessionId, { chapterReadingMode: 'continuous' })
+
+    expect(applied).toMatchObject({ toolCardMode: 'standard', chapterReadingMode: 'continuous' })
+    expect((await readSessionLog(record.logPath)).metadata.at(-1)?.chapterReadingMode).toBe('continuous')
+    expect((await store.listSummaries()).find((summary) => summary.sessionId === record.sessionId)?.preferences).toMatchObject({
+      toolCardMode: 'standard',
+      chapterReadingMode: 'continuous',
+    })
+
+    const restartedStore = new SessionStore(dir)
+    expect((await restartedStore.load(record.sessionId)).preferences).toMatchObject({
+      toolCardMode: 'standard',
+      chapterReadingMode: 'continuous',
+    })
+
+    await restartedStore.updatePreferences(record.sessionId, { chapterReadingMode: undefined })
+    expect((await readSessionLog(record.logPath)).metadata.at(-1)?.chapterReadingMode).toBeNull()
+    const clearedStore = new SessionStore(dir)
+    const cleared = await clearedStore.load(record.sessionId)
+    expect(cleared.preferences.chapterReadingMode).toBeUndefined()
+    expect(cleared.preferences.toolCardMode).toBe('standard')
+    expect((await clearedStore.listSummaries()).find((summary) => summary.sessionId === record.sessionId)?.preferences?.chapterReadingMode).toBeUndefined()
+  })
 })
 
 describe('SessionStore runtime context snapshots', () => {
@@ -1195,6 +1329,7 @@ describe('SessionStore runtime context snapshots', () => {
   })
   afterEach(() => {
     contextWriteTest.beforeWrite = undefined
+    storageDeleteTest.beforeRm = undefined
     rmSync(dir, { recursive: true, force: true })
   })
 

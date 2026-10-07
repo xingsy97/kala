@@ -1,10 +1,11 @@
 import { createServer, get, type Server as HttpServer } from 'node:http'
-import { connect as connectTcp, type Socket as TcpSocket } from 'node:net'
+import { connect as connectTcp, Socket as TcpSocket } from 'node:net'
+import { TLSSocket } from 'node:tls'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Server as SocketIOServer } from 'socket.io'
 import { io as connect, type Socket } from 'socket.io-client'
 
-import { createRuntimeUnitIngress } from './runtime-unit-ingress.js'
+import { createRuntimeUnitIngress, resetRuntimeUpgradeTransport } from './runtime-unit-ingress.js'
 
 const servers: HttpServer[] = []
 const ios: SocketIOServer[] = []
@@ -50,6 +51,12 @@ afterEach(async () => {
 })
 
 describe('RuntimeUnitIngress', () => {
+  it('closes TLS upgrade peers without crashing on unsupported TCP resets', () => {
+    const socket = new TLSSocket(new TcpSocket())
+    expect(() => resetRuntimeUpgradeTransport(socket)).not.toThrow()
+    expect(socket.destroyed).toBe(true)
+  })
+
   it.each(['polling', 'websocket'] as const)('routes independent %s Socket.IO and ACK traffic', async (transport) => {
     const a = await unit('a')
     const b = await unit('b')

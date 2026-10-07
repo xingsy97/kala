@@ -18,6 +18,18 @@ export type RuntimeUnitIngress = {
   close(): void
 }
 
+export function resetRuntimeUpgradeTransport(socket: Duplex): void {
+  if (socket.destroyed) return
+  // A raw TCP reset discards queued Socket.IO output. TLS sockets inherit from
+  // Socket, but Node rejects resetAndDestroy() on their wrapped native handle.
+  if (socket instanceof Socket) {
+    try { socket.resetAndDestroy(); return } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ERR_INVALID_HANDLE_TYPE') throw error
+    }
+  }
+  socket.destroy()
+}
+
 /**
  * Routes public HTTP and WebSocket-upgrade traffic to a TenantRuntimeUnit's
  * private HTTP listener. Authentication and user-to-unit mapping stay outside
@@ -35,13 +47,7 @@ export function createRuntimeUnitIngress(options: {
   const upgradeRequests = new Set<ClientRequest>()
   const upgradedUpstreams = new Set<Duplex>()
   const upgradePeers = new Map<Duplex, Duplex>()
-  const resetTransport = (socket: Duplex): void => {
-    // A normal FIN leaves a peer with buffered Socket.IO output in CLOSE_WAIT
-    // while it tries to flush bytes that can no longer be consumed. Resetting
-    // a TCP transport makes both ends discard that stale queue immediately.
-    if (socket instanceof Socket && !socket.destroyed) socket.resetAndDestroy()
-    else if (!socket.destroyed) socket.destroy()
-  }
+  const resetTransport = resetRuntimeUpgradeTransport
   const trackUpgrade = (set: Set<Duplex>, socket: Duplex): void => {
     set.add(socket)
     socket.once('close', () => set.delete(socket))

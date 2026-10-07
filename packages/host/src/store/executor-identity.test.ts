@@ -29,6 +29,15 @@ describe('ExecutorIdentityStore invite expiry', () => {
     expect(readFileSync(file, 'utf8')).not.toContain(invite.inviteToken)
   })
 
+  it('accepts an enrollment invite exactly once while retaining the enrolled device token', () => {
+    const store = new ExecutorIdentityStore(path())
+    const invite = store.createInvite({ label: 'one machine' })
+    const first = store.consumeInvite(invite.inviteToken, 'workspace-first')
+    expect(first.ok).toBe(true)
+    expect(store.consumeInvite(invite.inviteToken, 'workspace-second')).toEqual({ ok: false, reason: 'invalid_invite' })
+    if (first.ok) expect(store.resolveToken(first.token)?.workspaceId).toBe('workspace-first')
+  })
+
   it('recovers an empty primary file from the previous durable snapshot', () => {
     const file = path(), store = new ExecutorIdentityStore(file)
     const token = store.provisionWorkspace('workspace', 'Executor')
