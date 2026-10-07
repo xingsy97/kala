@@ -169,7 +169,7 @@ export function createWindowsSelfRemovalPlan(options: WindowsSelfRemovalPlanOpti
     `  exit 1\n` +
     `}\n`
   const encodedCommand = Buffer.from(script, 'utf16le').toString('base64')
-  const taskXml = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+  const taskXml = `<?xml version="1.0" encoding="UTF-16"?>\n` +
     `<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n` +
     `  <RegistrationInfo><Description>Kala Executor one-time removal</Description></RegistrationInfo>\n` +
     `  <Triggers />\n` +
@@ -178,6 +178,11 @@ export function createWindowsSelfRemovalPlan(options: WindowsSelfRemovalPlanOpti
     `  <Actions Context="System"><Exec><Command>powershell.exe</Command><Arguments>${xml(`-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodedCommand}`)}</Arguments></Exec></Actions>\n` +
     `</Task>\n`
   return { taskName, taskXmlPath, statusPath, taskXml }
+}
+
+/** schtasks imports the XML file as UTF-16LE with a matching declaration. */
+export function encodeWindowsTaskXml(taskXml: string): Buffer {
+  return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(taskXml, 'utf16le')])
 }
 
 export async function deleteWindowsSelfRemovalTask(

@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
 import { createMacosLaunchdService, executeLaunchdPlan } from './macos-launchd.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
 import type { InstallerSession } from './installer-session.js'
 
 const session: InstallerSession = {
@@ -218,6 +218,10 @@ describe('Windows service adapter', () => {
     expect(removal.taskName).toBe('KalaExecutor-Uninstall-0123456789abcdef')
     expect(removal.taskXmlPath).toBe("C:\\ProgramData\\Kala & Co\\Executor's\\.uninstall-0123456789abcdef.xml")
     expect(removal.statusPath).toBe('C:\\Windows\\Temp\\kala-executor-uninstall-0123456789abcdef.status')
+    expect(removal.taskXml).toContain('<?xml version="1.0" encoding="UTF-16"?>')
+    const xmlBytes = encodeWindowsTaskXml(removal.taskXml)
+    expect(xmlBytes.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xfe]))
+    expect(xmlBytes.subarray(2).toString('utf16le')).toBe(removal.taskXml)
     expect(removal.taskXml).toContain('<UserId>S-1-5-18</UserId>')
     expect(removal.taskXml).toContain('<LogonType>ServiceAccount</LogonType>')
     expect(removal.taskXml).not.toContain('.ps1')

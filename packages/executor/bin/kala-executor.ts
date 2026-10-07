@@ -50,7 +50,7 @@ import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile }
 import { acquireExecutorLock } from '../src/local-lock.js'
 import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
@@ -662,7 +662,7 @@ async function scheduleWindowsSelfRemoval(installDir: string, dataDir: string): 
     writeFileSync(removal.statusPath, 'queued', { mode: 0o600, flag: 'wx' })
     // dataDir was ACL-hardened to SYSTEM and Administrators before credentials
     // were installed. Keep the privileged task definition inside that boundary.
-    writeFileSync(removal.taskXmlPath, removal.taskXml, { mode: 0o600, flag: 'wx' })
+    writeFileSync(removal.taskXmlPath, encodeWindowsTaskXml(removal.taskXml), { mode: 0o600, flag: 'wx' })
     await registerWindowsSelfRemovalTask(removal)
     registered = true
     const deadline = Date.now() + 10_000
