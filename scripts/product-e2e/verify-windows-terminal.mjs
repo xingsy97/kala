@@ -83,6 +83,7 @@ async function verifyExecutorLifecycle() {
   const claim = await claimResponse.json()
   executorProcess = start(executor, ['--internal-installer'], {
     ...claim.env, EXECUTOR_INSTALL_ROOT: stateRoot, HOME: stateRoot, USERPROFILE: stateRoot,
+    KALA_TERMINAL_DIAGNOSTICS: '1',
   })
   const completedDeadline = Date.now() + 30_000
   let installationCompleted = false

@@ -554,11 +554,14 @@ export function startExecutor(options: ExecutorOptions): ExecutorHandle {
   })
 
   socket.on('terminal:create', async (payload, ack) => {
+    if (process.env.KALA_TERMINAL_DIAGNOSTICS === '1') logger.info('terminal create event received')
     if (payload.workspaceId !== workspaceId) {
       ack({ requestId: payload.requestId, workspaceId: payload.workspaceId, sessionId: payload.sessionId, error: 'workspace mismatch' })
       return
     }
-    ack(await terminals.create(payload))
+    const result = await terminals.create(payload)
+    if (process.env.KALA_TERMINAL_DIAGNOSTICS === '1') logger.info({ ok: Boolean(result.terminalId) }, 'terminal create event completed')
+    ack(result)
   })
 
   socket.on('terminal:input', (payload) => {
