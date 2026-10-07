@@ -61,6 +61,11 @@ describe('versioned product API', () => {
     expect(retry.accepted).toBe(true)
     await expect(client.sendMessage('api-a', { operationId: 'message-a', text: 'different' }))
       .rejects.toMatchObject({ status: 409, code: 'conflict' })
+    const structured = { operationId: 'message-content', text: '', content: [{ type: 'text' as const, text: 'alpha' }] }
+    await expect(client.sendMessage('api-a', structured)).resolves.toMatchObject({ accepted: true })
+    await expect(client.sendMessage('api-a', structured)).resolves.toMatchObject({ accepted: true })
+    await expect(client.sendMessage('api-a', { ...structured, content: [{ type: 'text', text: 'beta' }] }))
+      .rejects.toMatchObject({ status: 409, code: 'conflict' })
     await expect(client.getDagRun('api-b')).resolves.toEqual({ run: null })
 
     const forbiddenFetch: typeof fetch = async (input, init) => {
