@@ -1,4 +1,24 @@
 {
+  "v0.3.0-beta.1": {
+    "previousTag": "v0.2.0",
+    "improvements": [
+      "Private Cloud installs from its signed Compose bundle with a Node.js 22+ JavaScript Operator, bundled identity option, and single-host local-volume storage by default.",
+      "Windows x64 Portable Host uses the Node.js 22+ CJS asset with matching Copilot runtime files; Windows x64 Executor ships as a separate native binary with the ConPTY companion and PowerShell installer.",
+      "Linux x64 Portable container distribution packages one Host and embedded Dashboard, independent of the three-service Private Cloud deployment.",
+      "Linux x64 and macOS x64/arm64 Executors remain native by default; self-contained native Host and Dedicated binaries are manual qualification artifacts only."
+    ],
+    "fixes": [
+      "Private Cloud fresh-install acceptance now proves the candidate from the exact signed draft bundle rather than using the previous release as initial-install evidence.",
+      "Windows installation sessions require the exact Executor, ConPTY, and installer assets with matching release checksums."
+    ],
+    "knownIssues": [
+      "This is a beta: Private Cloud and Portable OCI remain unaccepted until exact-tag isolated-VM evidence succeeds; a draft release is not certification.",
+      "NFS remains an explicit experimental Private Cloud option and has no full-stack acceptance evidence; use local-volume by default.",
+      "Linux arm64 Executor is not in the default matrix. Windows Portable Host needs Node.js 22+ and adjacent Copilot runtime files; Host CJS alone cannot serve a Windows Executor installer.",
+      "GHCR Portable and Private Cloud package visibility must be reviewed before public promotion; image tags are not substitutes for signed immutable digests."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.2.0": {
     "previousTag": "v0.2.0-rc.20",
     "improvements": [

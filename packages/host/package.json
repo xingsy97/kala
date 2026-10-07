@@ -1,6 +1,6 @@
 {
   "name": "@agent-kernel/host",
-  "version": "0.2.0",
+  "version": "0.3.0-beta.1",
   "description": "Kala Host runtime: model adapters, session store, and Socket.IO server.",
   "repository": { "type": "git", "url": "git+https://github.com/xingsy97/kala.git" },
   "homepage": "https://github.com/xingsy97/kala#readme",
@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/dist/**'",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch --exclude \"../dashboard/**\" bin/kala-host.ts",
