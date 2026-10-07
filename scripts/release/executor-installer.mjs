@@ -150,23 +150,25 @@ try {
   if (-not $tar) { throw 'tar is required to install the ConPTY companion' }
   $listed = @(& $tar.Source -tzf $archive | ForEach-Object { $_ -replace '^\\./', '' } | Where-Object { $_ })
   if ($LASTEXITCODE -ne 0) { throw "Failed to inspect $companion" }
-  $expectedEntries = @('node-pty-companion.json', 'win32-x64/', 'win32-x64/conpty.node', 'win32-x64/conpty_console_list.node', 'win32-x64/pty.node', 'win32-x64/winpty-agent.exe', 'win32-x64/winpty.dll')
-  if (@(Compare-Object ($listed | Sort-Object -Unique) ($expectedEntries | Sort-Object -Unique)).Count -ne 0) { throw "$companion contains an unexpected file inventory" }
+  $expectedEntries = @('node-pty-companion.json', 'win32-x64/', 'win32-x64/conpty.node', 'win32-x64/conpty_console_list.node', 'win32-x64/pty.node', 'win32-x64/winpty-agent.exe', 'win32-x64/winpty.dll', 'worker/', 'worker/conoutSocketWorker.js', 'shared/', 'shared/conout.js')
+  if (@($listed).Count -ne $expectedEntries.Count -or @($listed | Sort-Object -Unique).Count -ne $expectedEntries.Count -or @(Compare-Object ($listed | Sort-Object) ($expectedEntries | Sort-Object)).Count -ne 0) { throw "$companion contains an unexpected file inventory" }
   & $tar.Source -xzf $archive -C $work
   if ($LASTEXITCODE -ne 0) { throw "Failed to extract $companion" }
 
   $manifest = Get-Content -Raw (Join-Path $work 'node-pty-companion.json') | ConvertFrom-Json
-  if ($manifest.schemaVersion -ne 1 -or $manifest.product -ne 'kala-executor-node-pty-companion' -or $manifest.target -ne 'win32-x64') { throw 'ConPTY companion manifest identity is invalid' }
-  if (@($manifest.files).Count -ne 5) { throw 'ConPTY companion manifest file inventory is invalid' }
-  $manifestPaths = @($manifest.files | ForEach-Object { $_.path })
-  $expectedManifestPaths = @('prebuilds/win32-x64/conpty.node', 'prebuilds/win32-x64/conpty_console_list.node', 'prebuilds/win32-x64/pty.node', 'prebuilds/win32-x64/winpty-agent.exe', 'prebuilds/win32-x64/winpty.dll')
-  if (@(Compare-Object ($manifestPaths | Sort-Object -Unique) ($expectedManifestPaths | Sort-Object -Unique)).Count -ne 0 -or @($manifestPaths | Sort-Object -Unique).Count -ne 5) { throw 'ConPTY companion manifest file inventory is invalid' }
+  if ($manifest.schemaVersion -ne 1 -or $manifest.product -ne 'kala-executor-node-pty-companion' -or $manifest.target -ne 'win32-x64' -or [string]$manifest.nodePtyVersion -notmatch '^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw 'ConPTY companion manifest identity is invalid' }
+  if (@($manifest.files).Count -ne 7) { throw 'ConPTY companion manifest file inventory is invalid' }
+  $manifestPaths = @($manifest.files | ForEach-Object { [string]$_.path })
+  $expectedManifestPaths = @('prebuilds/win32-x64/conpty.node', 'prebuilds/win32-x64/conpty_console_list.node', 'prebuilds/win32-x64/pty.node', 'prebuilds/win32-x64/winpty-agent.exe', 'prebuilds/win32-x64/winpty.dll', 'worker/conoutSocketWorker.js', 'shared/conout.js')
+  if (@($manifestPaths).Count -ne $expectedManifestPaths.Count -or @($manifestPaths | Sort-Object -Unique).Count -ne $expectedManifestPaths.Count -or @(Compare-Object ($manifestPaths | Sort-Object) ($expectedManifestPaths | Sort-Object)).Count -ne 0) { throw 'ConPTY companion manifest file inventory is invalid' }
   foreach ($file in @($manifest.files)) {
-    if ($file.path -notmatch '^prebuilds/win32-x64/(conpty\\.node|conpty_console_list\\.node|pty\\.node|winpty-agent\\.exe|winpty\\.dll)$') { throw 'ConPTY companion manifest contains an invalid path' }
-    $name = Split-Path $file.path -Leaf
-    $path = Join-Path (Join-Path $work 'win32-x64') $name
-    if ((Get-Item $path).Length -ne [int64]$file.bytes) { throw "ConPTY companion size mismatch for $name" }
-    Assert-Digest $path ([string]$file.sha256).ToLowerInvariant() $name
+    $runtimePath = [string]$file.path
+    if ($runtimePath -notmatch '^(prebuilds/win32-x64/(conpty\\.node|conpty_console_list\\.node|pty\\.node|winpty-agent\\.exe|winpty\\.dll)|worker/conoutSocketWorker\\.js|shared/conout\\.js)$') { throw 'ConPTY companion manifest contains an invalid path' }
+    if ([string]$file.sha256 -notmatch '^[0-9a-f]{64}$' -or [int64]$file.bytes -le 0) { throw 'ConPTY companion manifest file metadata is invalid' }
+    $archivePath = if ($runtimePath.StartsWith('prebuilds/win32-x64/')) { $runtimePath.Substring('prebuilds/'.Length) } else { $runtimePath }
+    $path = Join-Path $work ($archivePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -ne [int64]$file.bytes) { throw "ConPTY companion size mismatch for $runtimePath" }
+    Assert-Digest $path ([string]$file.sha256) $runtimePath
   }
   $prebuilds = Join-Path $work 'prebuilds'
   New-Item -ItemType Directory -Path $prebuilds -Force | Out-Null

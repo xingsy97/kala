@@ -31,6 +31,9 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
   for (const source of [host, executor]) {
     assert.match(source, /^    runs-on: windows-latest$/mu)
     assert.doesNotMatch(source, /if:\s*false|self-hosted|\bbox\b|docker|podman|playwright|chromium/iu)
+    assert.match(source, /Require GNU tar and gzip from Git for Windows for reproducible archives/u)
+    assert.match(source, /Git\\usr\\bin[\s\S]*GITHUB_PATH/u)
+    assert.match(source, /TAR_OPTIONS=--force-local/u)
   }
   assert.match(host, /--component host/u)
   assert.match(host, /PRODUCT_E2E_WINDOWS_TARGET: host/u)
@@ -39,6 +42,9 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
   assert.match(executor, /--component executor --native-only --native-target win32-x64/u)
   assert.match(executor, /kala-executor-win32-x64\.exe/u)
   assert.match(executor, /node-pty-win32-x64\.tar\.gz/u)
+  assert.match(executor, /worker\/conoutSocketWorker\.js/u)
+  assert.match(executor, /shared\/conout\.js/u)
+  assert.match(executor, /prepare-windows-release-fixture\.mjs --host-release/u)
   assert.match(executor, /PRODUCT_E2E_WINDOWS_TARGET: executor/u)
   assert.match(executor, /PRODUCT_E2E_WINDOWS_SERVICE: '1'/u)
   assert.doesNotMatch(executor, /continue-on-error/u)
@@ -46,6 +52,7 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
 
 test('Windows verifier fails closed on missing payloads, missing ConPTY, and unsupported Host integration', async () => {
   const verifier = await read('scripts/product-e2e/verify-windows-terminal.mjs')
+  assert.match(verifier, /KALA_RELEASE_ASSETS_DIR: hostRelease/u)
   for (const required of [
     'kala-dashboard-with-runtime.cjs',
     'kala-copilot-runtime-win32-x64',

@@ -28,7 +28,7 @@
  * `workspaceId` matches this executor's stored workspace id.
  */
 
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, resolve, join, sep } from 'node:path'
 import process from 'node:process'
 
@@ -50,7 +50,7 @@ import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile }
 import { acquireExecutorLock } from '../src/local-lock.js'
 import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
-import { assertManagedWindowsInstallation, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
@@ -332,8 +332,7 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
   }
   try {
     copyFileSync(process.execPath, plan.layout.executablePath)
-    const prebuilds = join(dirname(process.execPath), 'prebuilds')
-    if (existsSync(prebuilds)) cpSync(prebuilds, join(plan.layout.installDir, 'prebuilds'), { recursive: true, force: true })
+    copyWindowsNodePtyRuntime(dirname(process.execPath), plan.layout.installDir)
     writePrivateAtomic(credentialPath, `${token}\n`)
     writePrivateAtomic(plan.layout.configPath, `${JSON.stringify(config, null, 2)}\n`)
     await reportInstallation(env, 'service_installing')
