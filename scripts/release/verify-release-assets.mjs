@@ -7,6 +7,7 @@ import { verifyReleaseChecksums } from './release-checksums.mjs'
 import { inspectDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 import { dashboardArchiveName, releaseMetadataArchiveName, verifyDashboardArchive, verifyReleaseMetadataArchive } from './release-archives.mjs'
 import { verifyWindowsNodePtyCompanion } from './windows-executor-packager.mjs'
+import { verifyWindowsServiceHost, WINDOWS_SERVICE_HOST, windowsServiceHostManifestMetadata } from './windows-service-host.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
@@ -15,7 +16,7 @@ const manifestPath = join(releaseDir, 'manifest.json')
 if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-const supportedNativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64']
+const supportedNativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64', 'win32-x64']
 const supportedCopilotRuntimeTargets = supportedNativeTargets
 if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
   || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
@@ -33,20 +34,24 @@ const actualNativeTargets = Array.isArray(manifest.nativeTargets) ? [...manifest
 if (!actualNativeTargets
   || (actualNativeTargets.length !== 0
     && JSON.stringify(actualNativeTargets) !== JSON.stringify([...supportedNativeTargets].sort()))) {
-  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the three supported Executor targets')
+  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the four supported Executor targets')
 }
 for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   if (!Array.isArray(assets)) fail(`manifest.nativeAssets.${product} must be an array`)
   for (const asset of assets) {
     assertSupportedReleaseAssetName(asset, `manifest.nativeAssets.${product}`)
-    if (!supportedNativeTargets.some((target) => asset.endsWith(`-${target}`))) fail(`unsupported native asset target in ${asset}`)
+    if (!supportedNativeTargets.some((target) => asset === nativeExecutorAssetName(target))) fail(`unsupported native asset target in ${asset}`)
   }
 }
 const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const expectedWindowsServiceHost = targetsForInventory.includes('win32-x64') ? windowsServiceHostManifestMetadata() : undefined
+if (JSON.stringify(manifest.windowsServiceHost) !== JSON.stringify(expectedWindowsServiceHost)) {
+  fail('manifest.windowsServiceHost must identify the pinned WinSW source, license, size, and SHA-256')
+}
 const expectedNativeAssets = {
   'kala-host': [],
   'kala-runtime': [],
-  'kala-executor': targetsForInventory.map((target) => `kala-executor-${target}`),
+  'kala-executor': targetsForInventory.map(nativeExecutorAssetName),
   'kala-dedicated-ingress': [],
   'kala-dedicated-deploy-supervisor': [],
 }
@@ -70,6 +75,7 @@ const copilotRuntimeAssets = actualCopilotRuntimeTargets.flatMap((target) => [
 const expectedManifestAssets = [
   ...expectedNativeAssets['kala-executor'],
   ...copilotRuntimeAssets,
+  ...(targetsForInventory.includes('win32-x64') ? ['node-pty-win32-x64.tar.gz', WINDOWS_SERVICE_HOST.asset, 'install-executor.ps1'] : []),
   'kala-dashboard-with-runtime.cjs',
   'kala-runtime.cjs',
   'kala-executor.cjs',
@@ -96,9 +102,19 @@ const copilotRuntimeDependency = sbom.components.find((component) => component.n
 if (!copilotDependency || !copilotRuntimeDependency || !notices.includes('@github/copilot-sdk@')) {
   fail('release metadata must retain the upstream Copilot SDK and platform runtime dependencies')
 }
+if (targetsForInventory.includes('win32-x64')) {
+  const serviceHostDependency = sbom.components.find((component) => component.name === WINDOWS_SERVICE_HOST.product && component.version === WINDOWS_SERVICE_HOST.version)
+  if (!serviceHostDependency
+    || serviceHostDependency.licenses?.[0]?.license?.id !== WINDOWS_SERVICE_HOST.license
+    || serviceHostDependency.hashes?.[0]?.content !== WINDOWS_SERVICE_HOST.sha256
+    || !notices.includes(`${WINDOWS_SERVICE_HOST.product}@${WINDOWS_SERVICE_HOST.version} — ${WINDOWS_SERVICE_HOST.license}`)
+    || !notices.includes(readFileSync(join(root, 'scripts/release/licenses/WinSW-MIT.txt'), 'utf8').trimEnd())) {
+    fail('release metadata must retain the pinned WinSW source, digest, and complete MIT license')
+  }
+}
 const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
 if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
-  fail('signed final release requires the signature bundle and all three native Executor targets')
+  fail('signed final release requires the signature bundle and all four native Executor targets')
 }
 const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...(signaturePresent ? ['SHA256SUMS.sigstore.json'] : [])].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })
@@ -124,6 +140,16 @@ if (includesHost) {
   }
   try { inspectDedicatedSupportBundle(join(releaseDir, DEDICATED_SUPPORT_ARCHIVE)) } catch (error) { fail(error.message) }
   const hostBundle = readFileSync(join(releaseDir, 'kala-dashboard-with-runtime.cjs'), 'utf8')
+  const buildInfoLine = hostBundle.split('\n', 3)[1]
+  if (!buildInfoLine?.startsWith('globalThis.__KALA_BUILD_INFO__=')) fail('Portable Host CJS is missing release build metadata')
+  let hostBuildInfo
+  try { hostBuildInfo = JSON.parse(buildInfoLine.slice('globalThis.__KALA_BUILD_INFO__='.length).replace(/;$/u, '')) } catch { fail('Portable Host CJS build metadata is invalid') }
+  if (hostBuildInfo.gitCommit !== manifest.source.revision.slice(0, 12)
+    || hostBuildInfo.sourceSnapshotSha256 !== manifest.source.snapshotSha256
+    || hostBuildInfo.productVersion !== manifest.version
+    || hostBuildInfo.releaseTag !== manifest.tag
+    || hostBuildInfo.artifactKind !== 'cjs'
+    || hostBuildInfo.dashboardMode !== 'embedded') fail('Portable Host CJS differs from the signed manifest source/tag identity')
   const embeddedAssetsPrefix = 'globalThis.__KALA_EMBEDDED_RELEASE_ASSETS__='
   const embeddedAssetsStart = hostBundle.indexOf(embeddedAssetsPrefix)
   if (embeddedAssetsStart < 0) fail('release Host bundle is missing embedded release assets')
@@ -193,7 +219,6 @@ for (const asset of manifest.assets) {
     if (!text.includes('wget -nv -O')) {
       fail(`${asset} user-facing examples must use diagnostic temp-file bootstrap commands`)
     }
-    if (/win32|mingw|msys|cygwin|\.exe|\.ps1|conpty/iu.test(text)) fail(`${asset} must not offer Windows release assets`)
     if (!text.includes('KALA_RUNTIME:-auto')) {
       fail(`${asset} must support KALA_RUNTIME=auto|cjs|native`)
     }
@@ -279,10 +304,9 @@ if ((notes.match(/\bwget\b/g) ?? []).length > 1) {
 if (/kala-(?:dashboard-with-runtime|host|executor)\.cjs\s*\|\s*node/.test(notes)) {
   fail('release notes must not pipe Node.js assets directly to node')
 }
-if (!notes.includes('Linux x64 and macOS x64/arm64') || !notes.includes('Linux arm64 and Windows release assets are not included')) {
-  fail('release notes must state the three-target Linux/macOS support scope')
+if (!notes.includes('Linux x64, macOS x64/arm64, and Windows x64') || !notes.includes('Linux arm64 and Windows arm64 release assets are not included')) {
+  fail('release notes must state the exact four-target support scope')
 }
-if (/https?:\/\/\S*(?:win32|windows|\.ps1|\.exe|conpty)/iu.test(notes)) fail('release notes must not offer Windows downloads')
 
 try {
   await verifyReleaseChecksums(releaseDir, [...manifest.assets, 'manifest.json'])
@@ -294,6 +318,13 @@ if (manifest.assets.includes('node-pty-win32-x64.tar.gz')) {
     verifyWindowsNodePtyCompanion(join(releaseDir, 'node-pty-win32-x64.tar.gz'))
   } catch (error) {
     fail(`Windows node-pty companion verification failed: ${error.message}`)
+  }
+}
+if (manifest.assets.includes(WINDOWS_SERVICE_HOST.asset)) {
+  try {
+    verifyWindowsServiceHost(join(releaseDir, WINDOWS_SERVICE_HOST.asset))
+  } catch (error) {
+    fail(`Windows service host verification failed: ${error.message}`)
   }
 }
 
@@ -374,7 +405,13 @@ if (nativeExecutor) {
 console.log('release assets verified')
 
 function isNativeAsset(asset) {
-  return /^kala-(?:host|executor|dedicated-ingress|dedicated-deploy-supervisor)-(linux|darwin)-(x64|arm64)$/.test(asset)
+  return /^kala-(?:host|executor|dedicated-ingress|dedicated-deploy-supervisor)-(?:linux|darwin)-(?:x64|arm64)$/.test(asset)
+    || asset === 'kala-executor-win32-x64.exe'
+    || asset === WINDOWS_SERVICE_HOST.asset
+}
+
+function nativeExecutorAssetName(target) {
+  return target === 'win32-x64' ? 'kala-executor-win32-x64.exe' : `kala-executor-${target}`
 }
 
 function nativeAssetName(base) {
@@ -384,7 +421,18 @@ function nativeAssetName(base) {
 }
 
 function assertSupportedReleaseAssetName(name, location) {
-  if (typeof name !== 'string' || /(?:linux-arm64|win32|windows|conpty)/iu.test(name) || /\.(?:exe|ps1)$/iu.test(name) || /^node-pty-.*\.tar\.gz$/iu.test(name) || /^executor-update-(?:manifest\.json|public-key\.pem)$/u.test(name)) {
+  const acceptedWindows = new Set([
+    'kala-executor-win32-x64.exe',
+    'node-pty-win32-x64.tar.gz',
+    WINDOWS_SERVICE_HOST.asset,
+    'install-executor.ps1',
+    'kala-copilot-runtime-win32-x64',
+    'kala-copilot-runtime-node-win32-x64.node',
+  ])
+  if (typeof name !== 'string'
+    || /linux-arm64/iu.test(name)
+    || ((/(?:win32|windows|conpty)/iu.test(name) || /\.(?:exe|ps1)$/iu.test(name) || /^node-pty-.*\.tar\.gz$/iu.test(name)) && !acceptedWindows.has(name))
+    || /^executor-update-(?:manifest\.json|public-key\.pem)$/u.test(name)) {
     fail(`${location} contains unsupported or platform-ambiguous release asset ${String(name)}`)
   }
 }

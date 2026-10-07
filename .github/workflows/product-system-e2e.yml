@@ -71,6 +71,9 @@ jobs:
         run: |
           if (-not (Test-Path release/kala-executor-win32-x64.exe)) { throw 'missing Windows Executor' }
           if (-not (Test-Path release/node-pty-win32-x64.tar.gz)) { throw 'missing ConPTY companion' }
+          if (-not (Test-Path release/kala-executor-service-host-win32-x64.exe)) { throw 'missing Windows service host' }
+          node --input-type=module -e "import { verifyWindowsServiceHost } from './scripts/release/windows-service-host.mjs'; verifyWindowsServiceHost('release/kala-executor-service-host-win32-x64.exe')"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows service host verification failed' }
           tar -xzf release/node-pty-win32-x64.tar.gz -C release
           if ($LASTEXITCODE -ne 0) { throw 'Windows ConPTY archive extraction failed' }
           New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null

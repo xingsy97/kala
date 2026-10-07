@@ -67,6 +67,7 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
     /Windows x64/,
     /kala-executor-win32-x64\.exe/,
     /node-pty-win32-x64\.tar\.gz/,
+    /kala-executor-service-host-win32-x64\.exe/,
     /SHA256SUMS\.sigstore\.json/,
     /cosign\.Source verify-blob/,
     /Get-FileHash -Algorithm SHA256/,
@@ -95,6 +96,8 @@ test('release builder emits the three-target RC manifest while preserving instal
   assert.doesNotMatch(builder, /legacyExecutorNativeAssetName|runlab-executor/)
   assert.match(builder, /const supportedNativeBuildTargets = \[\.\.\.nativeTargets, WINDOWS_EXECUTOR_TARGET\]/)
   assert.match(builder, /packageWindowsNodePtyCompanion/)
+  assert.match(builder, /stageWindowsServiceHost/)
+  assert.match(builder, /windowsServiceHostManifestMetadata/)
   assert.match(builder, /generateExecutorInstallerPowerShell/)
   assert.match(builder, /Windows native release builds are Executor-only; Portable Host remains a Node\.js 22\+ CJS asset/)
   assert.match(builder, /Node SEA builds are not cross-compiled/)

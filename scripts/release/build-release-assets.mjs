@@ -25,6 +25,11 @@ import {
   WINDOWS_EXECUTOR_TARGET,
   windowsNodePtyCompanionAssetName,
 } from './windows-executor-packager.mjs'
+import {
+  stageWindowsServiceHost,
+  WINDOWS_SERVICE_HOST,
+  windowsServiceHostManifestMetadata,
+} from './windows-service-host.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const outDir = join(root, 'release')
@@ -198,6 +203,7 @@ if (nativeOnly && nativeTarget === WINDOWS_EXECUTOR_TARGET && entries.some((entr
     outputPath: join(outDir, windowsNodePtyCompanionAssetName(nativeTarget)),
     target: nativeTarget,
   })
+  await stageWindowsServiceHost(join(outDir, WINDOWS_SERVICE_HOST.asset))
 }
 
 if (nativeOnly) {
@@ -206,6 +212,7 @@ if (nativeOnly) {
   for (const item of entries) console.log(` - ${basename(nativeAssetName(item.name, nativeTarget))}`)
   if (nativeTarget === WINDOWS_EXECUTOR_TARGET && entries.some((entry) => entry.role === 'executor')) {
     console.log(` - ${windowsNodePtyCompanionAssetName(nativeTarget)}`)
+    console.log(` - ${WINDOWS_SERVICE_HOST.asset}`)
   }
   if (copilotRuntimeTargets.includes(nativeTarget)) {
     for (const asset of copilotRuntimeAssetNames(nativeTarget)) console.log(` - ${asset}`)
@@ -301,6 +308,7 @@ function finalizeRelease() {
     node: '>=22',
     nativeTargets: nativeTargets.filter((target) => builtEntries.some((entry) => entry.natives.includes(nativeAssetName(entry.name, target)))),
     copilotRuntimeTargets: packagedCopilotRuntimeTargets,
+    windowsServiceHost: exists(WINDOWS_SERVICE_HOST.asset) ? windowsServiceHostManifestMetadata() : undefined,
     assets,
     nativeAssets: {
       ...Object.fromEntries(builtEntries.map((entry) => [entry.name, entry.natives])),
@@ -345,6 +353,21 @@ function writeDependencyMetadata() {
       }
     }
   }
+  if (exists(WINDOWS_SERVICE_HOST.asset)) {
+    components.push({
+      type: 'application',
+      name: WINDOWS_SERVICE_HOST.product,
+      version: WINDOWS_SERVICE_HOST.version,
+      hashes: [{ alg: 'SHA-256', content: WINDOWS_SERVICE_HOST.sha256 }],
+      licenses: [{ license: { id: WINDOWS_SERVICE_HOST.license } }],
+      externalReferences: [{ type: 'distribution', url: WINDOWS_SERVICE_HOST.sourceUrl }],
+      properties: [
+        { name: 'agent-runlab:release-asset', value: WINDOWS_SERVICE_HOST.asset },
+        { name: 'agent-runlab:upstream-asset', value: WINDOWS_SERVICE_HOST.upstreamAsset },
+        { name: 'agent-runlab:bytes', value: String(WINDOWS_SERVICE_HOST.bytes) },
+      ],
+    })
+  }
   components.sort((left, right) => `${left.name}@${left.version}`.localeCompare(`${right.name}@${right.version}`))
   const sbom = {
     bomFormat: 'CycloneDX',
@@ -368,6 +391,11 @@ function writeDependencyMetadata() {
     '',
     ...components.map((item) => `${item.name}@${item.version} — ${item.licenses[0].license.id}`),
     '',
+    ...(exists(WINDOWS_SERVICE_HOST.asset) ? [
+      `WinSW ${WINDOWS_SERVICE_HOST.version} — complete MIT license and copyright notice:`,
+      readFileSync(join(root, 'scripts/release/licenses/WinSW-MIT.txt'), 'utf8').trimEnd(),
+      '',
+    ] : []),
   ]
   writeFileSync(join(outDir, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n'))
 }
@@ -382,13 +410,14 @@ function prepareBootstrapAssets() {
   if (component === 'all' || component === 'executor') {
     const windowsExecutable = executorNativeAssetName(WINDOWS_EXECUTOR_TARGET)
     const windowsCompanion = windowsNodePtyCompanionAssetName(WINDOWS_EXECUTOR_TARGET)
-    if (exists(windowsExecutable) || exists(windowsCompanion)) {
-      if (!exists(windowsExecutable) || !exists(windowsCompanion)) {
-        throw new Error('Windows Executor and ConPTY companion must be staged together')
+    const windowsServiceHost = WINDOWS_SERVICE_HOST.asset
+    if (exists(windowsExecutable) || exists(windowsCompanion) || exists(windowsServiceHost)) {
+      if (!exists(windowsExecutable) || !exists(windowsCompanion) || !exists(windowsServiceHost)) {
+        throw new Error('Windows Executor, ConPTY companion, and service host must be staged together')
       }
       const installer = windowsExecutorInstallerAssetName()
       writeFileSync(join(outDir, installer), generateExecutorInstallerPowerShell({ repo, tag }))
-      bootstrapAssets.push(installer, windowsCompanion)
+      bootstrapAssets.push(installer, windowsCompanion, windowsServiceHost)
     }
   }
   return bootstrapAssets

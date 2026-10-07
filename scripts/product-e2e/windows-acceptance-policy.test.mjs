@@ -42,6 +42,8 @@ test('hosted Windows acceptance keeps Host CJS and native Executor targets separ
   assert.match(executor, /--component executor --native-only --native-target win32-x64/u)
   assert.match(executor, /kala-executor-win32-x64\.exe/u)
   assert.match(executor, /node-pty-win32-x64\.tar\.gz/u)
+  assert.match(executor, /kala-executor-service-host-win32-x64\.exe/u)
+  assert.match(executor, /verifyWindowsServiceHost/u)
   assert.match(executor, /worker\/conoutSocketWorker\.js/u)
   assert.match(executor, /shared\/conout\.js/u)
   assert.match(executor, /prepare-windows-release-fixture\.mjs --host-release/u)
@@ -58,11 +60,14 @@ test('Windows verifier fails closed on missing payloads, missing ConPTY, and uns
     'kala-copilot-runtime-win32-x64',
     'kala-copilot-runtime-node-win32-x64.node',
     'kala-executor-win32-x64.exe',
+    'kala-executor-service-host-win32-x64.exe',
     'conpty.node',
     'conpty_console_list.node',
     'pty.node',
     'winpty-agent.exe',
     'winpty.dll',
+    'conoutSocketWorker.js',
+    'conout.js',
   ]) assert.match(verifier, new RegExp(required.replaceAll('.', '\\.'), 'u'))
   assert.match(verifier, /platform: 'windows'/u)
   assert.match(verifier, /windows_installation_unsupported/u)

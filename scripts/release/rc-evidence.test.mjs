@@ -5,9 +5,9 @@ import test from 'node:test'
 const revision = 'a'.repeat(40)
 const tag = 'v0.2.0-rc.1'
 
-test('requires exactly three Linux and macOS Portable targets', () => {
+test('requires exactly four Linux, macOS, and Windows Portable targets', () => {
   const portable = requiredReleaseEvidence.portable.targets.map((target) => create('portable', target))
-  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 3)
+  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 4)
   assert.throws(() => create('portable', 'linux-arm64'), /unsupported portable evidence target/u)
   assert.throws(() => verifyRcEvidenceSet([...portable, create('dedicated', 'linux-x64-systemd')], { tag, revision }), /unexpected targets/u)
   assert.throws(() => verifyRcEvidenceSet(portable.slice(1), { tag, revision }), /matrix is incomplete/u)
@@ -17,6 +17,18 @@ test('requires mTLS, cross-Unit limits and restart recovery in Private Cloud acc
   const record = create('private-cloud', 'linux-x64-compose')
   assert.equal(record.checks.mtlsClientRejection, true)
   for (const check of ['mtlsClientRejection', 'unitResourceIsolation', 'runtimeRestartRecovery']) {
+    assert.throws(() => validateRcEvidence({ ...record, checks: { ...record.checks, [check]: false } }), new RegExp(`did not prove ${check}`, 'u'))
+  }
+})
+
+test('fresh Private Cloud evidence requires candidate-first and digest-pinning checks without lifecycle claims', () => {
+  const record = create('private-cloud', 'linux-x64-compose-fresh')
+  assert.equal(validateRcEvidence(record), record)
+  assert.equal(record.checks.freshCandidateInstall, true)
+  assert.equal(record.checks.imageDigestPinning, true)
+  assert.equal(record.checks.fullUpgrade, undefined)
+  assert.equal(record.checks.rollback, undefined)
+  for (const check of ['freshCandidateInstall', 'imageDigestPinning', 'browser', 'executor', 'tenantIsolation', 'backupRestore']) {
     assert.throws(() => validateRcEvidence({ ...record, checks: { ...record.checks, [check]: false } }), new RegExp(`did not prove ${check}`, 'u'))
   }
 })
@@ -36,10 +48,18 @@ test('rejects diagnostics, private locations, URLs, and sensitive fields', () =>
 })
 
 function create(category, target) {
+  const windowsNames = [
+    'kala-dashboard-with-runtime.cjs', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz',
+    'kala-executor-service-host-win32-x64.exe', 'install-executor.ps1', 'kala-copilot-runtime-win32-x64', 'kala-copilot-runtime-node-win32-x64.node',
+  ]
+  const windows = category === 'portable' && target === 'win32-x64'
+  const artifact = windows ? { name: windowsNames[0], sha256: 'b'.repeat(64) } : { name: category + '-' + target + '.tar.gz', sha256: 'b'.repeat(64) }
+  const checks = requiredReleaseEvidence[category].targetChecks?.[target] ?? requiredReleaseEvidence[category].checks
   return createRcEvidence({
     category, target, tag, version: tag.slice(1), revision, ok: true,
-    artifact: { name: category + '-' + target + '.tar.gz', sha256: 'b'.repeat(64) },
-    checks: Object.fromEntries(requiredReleaseEvidence[category].checks.map((name) => [name, true])),
+    artifact,
+    ...(windows ? { artifacts: windowsNames.map((name) => ({ name, sha256: 'b'.repeat(64) })) } : {}),
+    checks: Object.fromEntries(checks.map((name) => [name, true])),
     generatedAt: '2026-08-21T00:00:00.000Z',
   })
 }

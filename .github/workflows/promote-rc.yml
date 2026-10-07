@@ -41,15 +41,32 @@ jobs:
               -f branch="$TAG" -f event=push -f status=success -f per_page=100 \
               --jq '.workflow_runs[].head_sha' | awk -v revision="$REVISION" '$0 == revision { found=1 } END { exit !found }'
           done
-          mapfile -t release_assets < <(gh release view "$TAG" --json assets --jq '.assets[].name')
-          for asset in "${release_assets[@]}"; do
-            case "${asset,,}" in
-              *.ps1|*.exe|*.msi|*.dll|*win32*|*windows*|*conpty*|*winpty*)
-                echo "Windows release asset is not allowed: $asset" >&2
-                exit 1
-                ;;
-            esac
-          done
+          if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+            # A successful image/bundle job is not fresh-install evidence: require
+            # the exact candidate-first Private Cloud VM job and the independent
+            # Portable OCI digest VM job on this same tag and source revision.
+            pc_run=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/private-cloud-release.yml/runs" \
+              -f branch="$TAG" -f event=push -f status=success -f per_page=100 \
+              --jq '.workflow_runs[] | [.head_sha, .id, .run_attempt] | @tsv' | awk -F '\t' -v revision="$REVISION" '$1 == revision { print; exit }')
+            test -n "$pc_run"
+            IFS=$'\t' read -r _ FRESH_RUN_ID FRESH_RUN_ATTEMPT <<< "$pc_run"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$FRESH_RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "Fresh beta candidate install and restore (exact signed draft release)") | .conclusion' | grep -Fxq success
+            echo "FRESH_RUN_ID=$FRESH_RUN_ID" >> "$GITHUB_ENV"
+            echo "FRESH_RUN_ATTEMPT=$FRESH_RUN_ATTEMPT" >> "$GITHUB_ENV"
+            portable_run=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/portable-image-release.yml/runs" \
+              -f branch="$TAG" -f event=workflow_dispatch -f status=success -f per_page=100 \
+              --jq '.workflow_runs[] | [.head_sha, .id, .run_attempt] | @tsv' | awk -F '\t' -v revision="$REVISION" '$1 == revision { print; exit }')
+            test -n "$portable_run"
+            IFS=$'\t' read -r _ PORTABLE_RUN_ID PORTABLE_RUN_ATTEMPT <<< "$portable_run"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PORTABLE_RUN_ID/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "isolated-vm-acceptance") | .conclusion' | grep -Fxq success
+            echo "PORTABLE_RUN_ID=$PORTABLE_RUN_ID" >> "$GITHUB_ENV"
+            echo "PORTABLE_RUN_ATTEMPT=$PORTABLE_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          fi
+          # The closed-set promotion verifier checks every filename and digest
+          # after download. In particular the six required Windows release
+          # assets must not be rejected by the old three-platform policy.
       - name: Download and fail-closed verify the complete evidence matrix
         env: { GH_TOKEN: '${{ github.token }}', RUN_ID: '${{ inputs.acceptance_run_id }}', TAG: '${{ inputs.tag }}' }
         run: |
@@ -71,10 +88,10 @@ jobs:
           CANDIDATE=$(mktemp -d)
           gh release download "$TAG" --dir "$CANDIDATE"
           REVISION=$(git rev-parse HEAD)
-          # The core release owns the exact 27-asset manifest. Verify the separately
+          # The core release owns the exact four-platform manifest. Verify the separately
           # signed Private Cloud assets before removing them from this disposable
           # download directory so core manifest closure remains strict.
-          for target in linux-x64 linux-arm64; do
+          for target in linux-x64; do
             archive="$CANDIDATE/kala-private-cloud-${TAG#v}-$target.tar.gz"
             signature="$CANDIDATE/private-cloud-$target.sigstore.json"
             test -s "$archive" && test -s "$signature"
@@ -83,21 +100,55 @@ jobs:
               --certificate-oidc-issuer https://token.actions.githubusercontent.com "$archive"
             tar -xOzf "$archive" ./manifest.json | jq -e --arg revision "$REVISION" --arg version "${TAG#v}" \
               '.revision == $revision and .version == $version' >/dev/null
+            if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+              fresh_dir=$(mktemp -d)
+              gh run download "$FRESH_RUN_ID" \
+                --pattern "private-cloud-fresh-beta-evidence-$FRESH_RUN_ID-$FRESH_RUN_ATTEMPT" --dir "$fresh_dir"
+              mapfile -t fresh_files < <(find "$fresh_dir" -type f -name '*.rc-evidence.json')
+              test "${#fresh_files[@]}" -eq 1
+              node scripts/release/verify-private-cloud-fresh-evidence.mjs \
+                --evidence "${fresh_files[0]}" --archive "$archive" --tag "$TAG" --revision "$REVISION"
+            fi
             rm -- "$archive" "$signature"
           done
           node scripts/release/verify-promotion-candidate.mjs \
             --directory "$CANDIDATE" --evidence acceptance/evidence \
             --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"
-          # Paused for the current release: kala-host-linux-arm64
           for asset in manifest.json SHA256SUMS \
-            kala-host-linux-x64 \
-            kala-host-darwin-x64 kala-host-darwin-arm64; do
+            kala-executor-linux-x64 kala-executor-darwin-x64 \
+            kala-executor-darwin-arm64 kala-executor-win32-x64.exe \
+            node-pty-win32-x64.tar.gz kala-executor-service-host-win32-x64.exe install-executor.ps1 \
+            kala-dashboard-with-runtime.cjs \
+            kala-copilot-runtime-win32-x64 \
+            kala-copilot-runtime-node-win32-x64.node; do
             gh attestation verify "$CANDIDATE/$asset" --repo "$GITHUB_REPOSITORY"
           done
           cosign verify-blob \
             --bundle "$CANDIDATE/SHA256SUMS.sigstore.json" \
-            --certificate-identity-regexp "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@.*" \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$CANDIDATE/SHA256SUMS"
+          if [[ "$TAG" == v0.3.0-beta.1 ]]; then
+            portable_dir=$(mktemp -d)
+            gh run download "$PORTABLE_RUN_ID" \
+              --pattern "portable-isolated-vm-acceptance-$PORTABLE_RUN_ID-$PORTABLE_RUN_ATTEMPT" --dir "$portable_dir"
+            mapfile -t portable_metadata < <(find "$portable_dir" -type f -name metadata.json)
+            test "${#portable_metadata[@]}" -eq 1
+            portable_evidence_dir=$(dirname "${portable_metadata[0]}")
+            test "$(find "$portable_evidence_dir" -maxdepth 1 -type f | wc -l)" -eq 3
+            cosign verify-blob --bundle "$portable_evidence_dir/metadata.sigstore.json" \
+              --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/portable-image-release.yml@refs/tags/$TAG" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$portable_evidence_dir/metadata.json"
+            public_image=$(node scripts/release/verify-portable-public.mjs \
+              --metadata "$portable_evidence_dir/metadata.json" \
+              --acceptance "$portable_evidence_dir/acceptance.json" \
+              --tag "$TAG" --revision "$REVISION" --repository "$GITHUB_REPOSITORY" | jq -er .image)
+            # Fetch the manifest, config and every layer without the workflow's
+            # registry login: manifest-only checks do not prove a public pull.
+            anonymous_docker_config=$(mktemp -d)
+            DOCKER_CONFIG="$anonymous_docker_config" docker pull "$public_image"
+            DOCKER_CONFIG="$anonymous_docker_config" docker image inspect "$public_image" >/dev/null
+            rm -rf -- "$anonymous_docker_config"
+          fi
           test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
           gh release edit "$TAG" --draft=false

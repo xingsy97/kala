@@ -50,7 +50,7 @@ import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile }
 import { acquireExecutorLock } from '../src/local-lock.js'
 import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, createWindowsServicePlan, executeWindowsServicePlan, type WindowsServiceAction } from '../src/windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
 import { spawn } from 'node:child_process'
@@ -268,7 +268,7 @@ async function runInternalInstaller(): Promise<void> {
   const workspaceRoot = env.EXECUTOR_INSTALL_ROOT === '__KALA_CURRENT_DIRECTORY__' ? resolve(process.cwd()) : resolve(env.EXECUTOR_INSTALL_ROOT)
   process.stdout.write(`Kala workspace root: ${workspaceRoot}\n`)
   const service = env.EXECUTOR_INSTALL_MODE === 'service'
-  if (service && process.platform === 'win32') return await installWindowsService(env, workspaceRoot, redeemed.token)
+  if (service && process.platform === 'win32') return await installWindowsService(env, workspaceRoot, redeemed.token, workspaceId)
   const managedRoot = defaultManagedRoot(homedir(), service && process.getuid?.() === 0)
   const release = executorReleaseVersion()
   let managedInstall
@@ -314,13 +314,16 @@ async function runInternalInstaller(): Promise<void> {
   printServiceCommands(installerSession.mode, executable)
 }
 
-async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string): Promise<void> {
+async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string, workspaceId: string): Promise<void> {
   const serviceName = 'KalaExecutor'
   const plan = createWindowsServicePlan({
     serviceName, displayName: 'Kala Executor',
     programFiles: process.env.ProgramFiles, programData: process.env.ProgramData,
   })
   if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native kala-executor asset')
+  if (existsSync(plan.layout.installDir) || existsSync(plan.layout.dataDir)) {
+    throw new Error('Refusing to replace an existing Windows Executor installation or data directory')
+  }
   mkdirSync(plan.layout.installDir, { recursive: true, mode: 0o700 })
   mkdirSync(plan.layout.dataDir, { recursive: true, mode: 0o700 })
   const credentialPath = join(plan.layout.dataDir, 'credential')
@@ -328,11 +331,14 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
     version: 1, host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
     privilegeMode: env.EXECUTOR_PRIVILEGE_MODE,
     sandboxRoots: [workspaceRoot], credentialFile: credentialPath, installationId: env.EXECUTOR_INSTALL_ID,
-    installationSource: 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
+    workspaceId, installationSource: 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
   }
   try {
+    await secureWindowsServiceDataDir(plan.layout.dataDir)
     copyFileSync(process.execPath, plan.layout.executablePath)
     copyWindowsNodePtyRuntime(dirname(process.execPath), plan.layout.installDir)
+    copyWindowsServiceHost(dirname(process.execPath), plan.layout.installDir)
+    writePrivateAtomic(plan.layout.serviceConfigPath, renderWindowsServiceConfig(plan.layout, serviceName, 'Kala Executor'))
     writePrivateAtomic(credentialPath, `${token}\n`)
     writePrivateAtomic(plan.layout.configPath, `${JSON.stringify(config, null, 2)}\n`)
     await reportInstallation(env, 'service_installing')
@@ -343,6 +349,9 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
     process.stdout.write(`  Uninstall ${JSON.stringify(plan.layout.executablePath)} service uninstall\n`)
   } catch (error) {
     await executeWindowsServicePlan(plan, ['stop']).catch(() => undefined)
+    // Never remove a running service's executable or credentials. Preserve
+    // the installation for diagnosis if SCM cannot confirm it stopped.
+    await waitForWindowsServiceStopped(plan)
     await executeWindowsServicePlan(plan, ['delete']).catch(() => undefined)
     rmSync(plan.layout.installDir, { recursive: true, force: true }); rmSync(plan.layout.dataDir, { recursive: true, force: true })
     throw error
@@ -517,7 +526,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
   const handle = startExecutor({
     host,
-    workspaceId: loadOrCreateWorkspaceId(undefined, profile),
+    workspaceId: managed?.workspaceId ?? loadOrCreateWorkspaceId(undefined, profile),
     ...(name !== undefined ? { workspaceName: name } : {}),
     ...(sandboxRoots.length > 0 ? { sandboxRoots } : {}),
     ...(pairingToken !== undefined ? { token: pairingToken } : {}),
@@ -612,8 +621,12 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 }
 
 async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): Promise<void> {
-  if (action === 'logs') throw new Error('Windows service logs are available through Windows Event Viewer and are not streamed by this command')
   const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor', displayName: 'Kala Executor', programFiles: process.env.ProgramFiles, programData: process.env.ProgramData })
+  if (action === 'logs') {
+    process.stdout.write(`Windows service output: ${join(plan.layout.installDir, 'kala-executor-service.out.log')}\n`)
+    process.stdout.write(`Windows service errors: ${join(plan.layout.installDir, 'kala-executor-service.err.log')}\n`)
+    return
+  }
   const actions: readonly WindowsServiceAction[] = action === 'status' ? ['query'] : action === 'start' ? ['start'] : action === 'stop' ? ['stop'] : action === 'restart' ? ['stop', 'start'] : ['stop', 'delete']
   if (action === 'uninstall') {
     if (!existsSync(plan.layout.configPath)) throw new Error('No managed Windows Executor service configuration was found')
@@ -622,22 +635,52 @@ async function manageWindowsService(action: Exclude<ServiceAction, 'install'>): 
   let results
   if (action === 'uninstall' || action === 'restart') {
     await executeWindowsServicePlan(plan, ['stop']).catch(() => undefined)
+    await waitForWindowsServiceStopped(plan)
     results = await executeWindowsServicePlan(plan, actions.slice(1))
-  } else results = await executeWindowsServicePlan(plan, actions)
+  } else {
+    results = await executeWindowsServicePlan(plan, actions)
+    if (action === 'stop') await waitForWindowsServiceStopped(plan)
+  }
   for (const result of results) { if (result.stdout) process.stdout.write(result.stdout); if (result.stderr) process.stderr.write(result.stderr) }
   if (action === 'uninstall') {
-    rmSync(plan.layout.dataDir, { recursive: true, force: true })
-    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) scheduleWindowsSelfRemoval(plan.layout.installDir)
-    else rmSync(plan.layout.installDir, { recursive: true, force: true })
-    process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
+    if (resolve(process.execPath).startsWith(`${resolve(plan.layout.installDir)}${sep}`)) {
+      const statusFile = await scheduleWindowsSelfRemoval(plan.layout.installDir, plan.layout.dataDir)
+      process.stdout.write('\nKala Executor Windows service removal was scheduled. Program files and credentials will be removed after this process exits.\n')
+      process.stdout.write(`Removal status file: ${statusFile}\n`)
+    } else {
+      rmSync(plan.layout.dataDir, { recursive: true, force: true })
+      rmSync(plan.layout.installDir, { recursive: true, force: true })
+      process.stdout.write('\nKala Executor Windows service and credentials were removed.\n')
+    }
   }
 }
 
-function scheduleWindowsSelfRemoval(installDir: string): void {
-  const script = join(tmpdir(), `kala-executor-uninstall-${process.pid}.ps1`)
-  writeFileSync(script, `param([string]$Target,[int]$OwnerPid,[string]$Script)\n+$ErrorActionPreference='SilentlyContinue'\n+Wait-Process -Id $OwnerPid -Timeout 60\n+Remove-Item -LiteralPath $Target -Recurse -Force\n+Remove-Item -LiteralPath $Script -Force\n+`, { mode: 0o600 })
-  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, installDir, String(process.pid), script], { detached: true, windowsHide: true, stdio: 'ignore' })
-  child.unref()
+async function scheduleWindowsSelfRemoval(installDir: string, dataDir: string): Promise<string> {
+  const removal = createWindowsSelfRemovalPlan({ installDir, dataDir, ownerPid: process.pid, statusDir: tmpdir() })
+  let registered = false
+  try {
+    writeFileSync(removal.statusPath, 'queued', { mode: 0o600, flag: 'wx' })
+    // dataDir was ACL-hardened to SYSTEM and Administrators before credentials
+    // were installed. Keep the privileged task definition inside that boundary.
+    writeFileSync(removal.taskXmlPath, encodeWindowsTaskXml(removal.taskXml), { mode: 0o600, flag: 'wx' })
+    await registerWindowsSelfRemovalTask(removal)
+    registered = true
+    const deadline = Date.now() + 10_000
+    while (Date.now() < deadline) {
+      const status = readFileSync(removal.statusPath, 'utf8')
+      if (status.startsWith('failed:')) throw new Error(`Windows removal task failed during startup (${status.slice('failed:'.length)})`)
+      if (status !== 'queued') return basename(removal.statusPath)
+      await new Promise((resolveReady) => setTimeout(resolveReady, 100))
+    }
+    throw new Error('Windows removal task did not confirm startup')
+  } catch (error) {
+    if (registered) await deleteWindowsSelfRemovalTask(removal.taskName).catch(() => undefined)
+    throw error
+  } finally {
+    // Task Scheduler has copied the definition by this point. The encoded task
+    // action remains registered/running and does not read this XML at runtime.
+    rmSync(removal.taskXmlPath, { force: true })
+  }
 }
 
 main().catch((err) => {

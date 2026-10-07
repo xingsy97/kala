@@ -1,3 +1,5 @@
+import { WINDOWS_SERVICE_HOST } from './windows-service-host.mjs'
+
 const TARGETS = new Set(['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64', 'win32-x64'])
 
 export function mapExecutorPlatform(os, arch) {
@@ -109,6 +111,7 @@ if (-not [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.Int
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) { throw 'This installer requires Windows x64' }
 $asset = 'kala-executor-win32-x64.exe'
 $companion = 'node-pty-win32-x64.tar.gz'
+$serviceHost = '${WINDOWS_SERVICE_HOST.asset}'
 $work = if ($env:KALA_INSTALLER_WORK_DIR) { $env:KALA_INSTALLER_WORK_DIR } else { Join-Path ([IO.Path]::GetTempPath()) ('kala-installer-' + [guid]::NewGuid()) }
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 function Download-ReleaseAsset([string]$name) {
@@ -143,8 +146,10 @@ try {
   $sums = @(Get-Content $sumsPath)
   $binary = Download-ReleaseAsset $asset
   $archive = Download-ReleaseAsset $companion
+  $serviceHostBinary = Download-ReleaseAsset $serviceHost
   Assert-Digest $binary (Read-ExpectedDigest $asset $sums) $asset
   Assert-Digest $archive (Read-ExpectedDigest $companion $sums) $companion
+  Assert-Digest $serviceHostBinary (Read-ExpectedDigest $serviceHost $sums) $serviceHost
 
   $tar = Get-Command tar -ErrorAction SilentlyContinue
   if (-not $tar) { throw 'tar is required to install the ConPTY companion' }

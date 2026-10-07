@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,7 @@ const hostBundle = join(hostRelease, 'kala-dashboard-with-runtime.cjs')
 const hostRuntime = join(hostRelease, 'kala-copilot-runtime-win32-x64')
 const hostRuntimeNode = join(hostRelease, 'kala-copilot-runtime-node-win32-x64.node')
 const executor = join(executorRelease, 'kala-executor-win32-x64.exe')
+const serviceHost = join(executorRelease, 'kala-executor-service-host-win32-x64.exe')
 const executorPrebuild = join(executorRelease, 'prebuilds', 'win32-x64')
 const stateRoot = mkdtempSync(join(tmpdir(), 'kala-windows-terminal-'))
 const port = Number(process.env.PRODUCT_E2E_WINDOWS_TERMINAL_PORT ?? 3325)
@@ -26,6 +27,7 @@ const serviceMode = process.env.PRODUCT_E2E_WINDOWS_SERVICE === '1'
 let host
 let executorProcess
 let dashboard
+let serviceOwned = false
 
 try {
   if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('verify-windows-terminal.mjs requires a real Windows x64 runner')
@@ -45,6 +47,11 @@ try {
   if (target === 'host') {
     console.log('PASS Windows x64 Portable Host CJS boot and browser-accessible API')
   } else {
+    if (serviceMode) {
+      const preexisting = await run('sc.exe', ['query', 'KalaExecutor'])
+      if (preexisting.code === 0 || !preexisting.stdout.includes('1060')) throw new Error('Windows Executor service is not absent before isolated installation')
+      serviceOwned = true
+    }
     await verifyExecutorLifecycle()
   }
 } catch (error) {
@@ -54,13 +61,27 @@ try {
 } finally {
   dashboard?.close()
   await Promise.all([stop(executorProcess), stop(host)])
+  if (serviceOwned) {
+    const remaining = await run('sc.exe', ['query', 'KalaExecutor']).catch(() => ({ code: -1, stdout: '' }))
+    if (remaining.code === 0) {
+      await run('sc.exe', ['stop', 'KalaExecutor']).catch(() => undefined)
+      await run('sc.exe', ['delete', 'KalaExecutor']).catch(() => undefined)
+      if (!process.exitCode) {
+        console.error('Windows service was not removed by the lifecycle acceptance test')
+        process.exitCode = 1
+      }
+    }
+  }
   rmSync(stateRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
 
 async function verifyExecutorLifecycle() {
   assertFiles([
     executor,
+    serviceHost,
     ...['conpty.node', 'conpty_console_list.node', 'pty.node', 'winpty-agent.exe', 'winpty.dll'].map((name) => join(executorPrebuild, name)),
+    join(executorRelease, 'worker', 'conoutSocketWorker.js'),
+    join(executorRelease, 'shared', 'conout.js'),
   ], 'Windows native Executor and complete node-pty companion')
 
   const createResponse = await fetch(`${origin}/api/executor-installs`, {
@@ -93,7 +114,33 @@ async function verifyExecutorLifecycle() {
     if (snapshot.status === 'completed') { installationCompleted = true; break }
     await sleep(100)
   }
-  if (!installationCompleted) throw new Error('Windows Executor installation did not complete')
+  if (!installationCompleted) {
+    if (serviceMode) {
+      const scm = await run('sc.exe', ['query', 'KalaExecutor'])
+      const installDir = join(process.env.ProgramFiles, 'Kala', 'Executor')
+      const evidence = Object.fromEntries(['wrapper', 'out', 'err'].map((kind) => {
+        const path = join(installDir, `kala-executor-service.${kind}.log`)
+        if (!existsSync(path)) return [kind, { present: false }]
+        const body = readFileSync(path, 'utf8').slice(-16_384)
+        return [kind, {
+          bytes: statSync(path).size,
+          accessDenied: /access denied|UnauthorizedAccessException/iu.test(body),
+          missingFile: /cannot find|not found|FileNotFoundException/iu.test(body),
+          configError: /Invalid Executor config|Invalid Executor credential/iu.test(body),
+          identityRejected: /workspace_identity_mismatch|auth_failed|workspace_id_conflict/iu.test(body),
+          exited: /process exited|exited with code/iu.test(body),
+        }]
+      }))
+      throw new Error(`Windows Executor installation did not complete; SCM state=${scm.stdout.match(/STATE\s*:\s*\d+\s+\w+/u)?.[0] ?? 'unavailable'}; service log signals=${JSON.stringify(evidence)}`)
+    }
+    throw new Error('Windows Executor installation did not complete')
+  }
+  if (serviceMode) {
+    const status = await run('sc.exe', ['query', 'KalaExecutor'])
+    if (status.code !== 0 || !/STATE\s*:\s*4\s+RUNNING/u.test(status.stdout)) throw new Error(`Windows Executor service did not reach RUNNING: ${status.stdout || status.stderr}`)
+    const config = await run('sc.exe', ['qc', 'KalaExecutor'])
+    if (config.code !== 0 || !config.stdout.includes('kala-executor-service.exe')) throw new Error('SCM did not start the verified service host')
+  }
 
   dashboard = io(`${origin}/dashboard`, { transports: ['websocket'], auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION }, reconnection: false })
   await once(dashboard, 'session:ready')
@@ -112,6 +159,20 @@ async function verifyExecutorLifecycle() {
   const output = []
   dashboard.on('server:terminal_output', (payload) => { if (payload.terminalId === createdTerminal.terminalId) output.push(payload.data) })
   dashboard.emit('terminal:resize', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, cols: 120, rows: 40 })
+  // ConPTY creation can ACK before PowerShell is ready to consume input. A
+  // command's echoed source is not proof of execution; require a result that
+  // cannot occur in the source text before testing the real user input once.
+  const readyToken = `KALA_READY_${Date.now()}_`
+  const readyDeadline = Date.now() + 40_000
+  let nextReadyProbe = 0
+  while (Date.now() < readyDeadline && !output.join('').includes(`${readyToken}True`)) {
+    if (Date.now() >= nextReadyProbe) {
+      dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ("${readyToken}" + (2 -eq 2))\r` })
+      nextReadyProbe = Date.now() + 3_000
+    }
+    await sleep(50)
+  }
+  if (!output.join('').includes(`${readyToken}True`)) throw new Error(`PowerShell was not ready after ConPTY create; output=${output.join('').slice(-2000)}`)
   dashboard.emit('terminal:input', { workspaceId, sessionId, terminalId: createdTerminal.terminalId, data: `Write-Output ${marker}\r` })
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline && !output.join('').includes(marker)) await sleep(50)
@@ -130,12 +191,31 @@ async function verifyExecutorLifecycle() {
     const installDir = join(process.env.ProgramFiles, 'Kala', 'Executor')
     const dataDir = join(process.env.ProgramData, 'Kala', 'Executor')
     const installedExecutor = join(installDir, 'kala-executor.exe')
-    assertFiles([installedExecutor, join(installDir, 'prebuilds', 'win32-x64', 'conpty.node'), join(dataDir, 'config.json')], 'managed Windows service installation')
+    assertFiles([installedExecutor, join(installDir, 'kala-executor-service.exe'), join(installDir, 'prebuilds', 'win32-x64', 'conpty.node'),
+      join(installDir, 'worker', 'conoutSocketWorker.js'), join(installDir, 'shared', 'conout.js'),
+      join(dataDir, 'config.json')], 'managed Windows service installation')
     const uninstall = await run(installedExecutor, ['service', 'uninstall'])
-    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service and credentials were removed')) throw new Error(`Windows service uninstall failed: ${uninstall.stderr}`)
-    const uninstallDeadline = Date.now() + 30_000
-    while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir))) await sleep(100)
-    if (existsSync(installDir) || existsSync(dataDir)) throw new Error('Windows service uninstall left managed installation data')
+    const statusName = uninstall.stdout.match(/Removal status file: (kala-executor-uninstall-[A-Za-z0-9]+\.status)/u)?.[1]
+    if (uninstall.code !== 0 || !uninstall.stdout.includes('Kala Executor Windows service removal was scheduled') || !statusName) {
+      const stage = /Unable to create Windows removal task/u.test(uninstall.stderr) ? 'register' : /Unable to start Windows removal task/u.test(uninstall.stderr) ? 'run' : /did not confirm startup/u.test(uninstall.stderr) ? 'startup-timeout' : /failed during startup/u.test(uninstall.stderr) ? 'startup-failed' : 'unknown'
+      const code = uninstall.stderr.match(/\b(?:0x[0-9a-f]{8}|2147[0-9]{6})\b/iu)?.[0] ?? 'none'
+      const failure = /XML/u.test(uninstall.stderr) ? 'xml' : /[Aa]ccess is denied/u.test(uninstall.stderr) ? 'access-denied' : /file specified could not be found|cannot find the file/u.test(uninstall.stderr) ? 'missing-file' : 'other'
+      const xmlPosition = uninstall.stderr.match(/\((\d+),(\d+)\)/u)?.slice(1).join(':') ?? 'none'
+      const xmlReason = /malformed/iu.test(uninstall.stderr) ? 'malformed' : /incorrectly formatted|out of range/iu.test(uninstall.stderr) ? 'value' : /unexpected node/iu.test(uninstall.stderr) ? 'unexpected-node' : /missing|required/iu.test(uninstall.stderr) ? 'missing-node' : 'other'
+      throw new Error(`Windows service uninstall was not scheduled; code=${uninstall.code}; stage=${stage}; failure=${failure}; xmlReason=${xmlReason}; xmlPosition=${xmlPosition}; taskErrorCode=${code}; stdoutBytes=${Buffer.byteLength(uninstall.stdout)}; stderrBytes=${Buffer.byteLength(uninstall.stderr)}`)
+    }
+    const removalStatus = join(tmpdir(), statusName)
+    const uninstallDeadline = Date.now() + 60_000
+    let outcome = existsSync(removalStatus) ? readFileSync(removalStatus, 'utf8') : 'status-missing'
+    while (Date.now() < uninstallDeadline && (existsSync(installDir) || existsSync(dataDir) || outcome !== 'removed')) {
+      if (outcome.startsWith('failed:')) break
+      await sleep(100)
+      outcome = existsSync(removalStatus) ? readFileSync(removalStatus, 'utf8') : 'status-missing'
+    }
+    if (existsSync(installDir) || existsSync(dataDir) || outcome !== 'removed') {
+      throw new Error(`Windows service uninstall left managed installation data; self-removal=${outcome}; installDir=${existsSync(installDir)}; dataDir=${existsSync(dataDir)}`)
+    }
+    rmSync(removalStatus, { force: true })
   }
   console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
 }
@@ -159,7 +239,7 @@ function stop(child) {
     child.kill()
   })
 }
-function run(file, args) { return new Promise((resolvePromise, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolvePromise({ code, stdout, stderr })) }) }
+function run(file, args) { return new Promise((resolvePromise, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolvePromise({ code, stdout, stderr, pid: child.pid })) }) }
 async function waitForHttp(url) { const deadline = Date.now() + 30_000; while (Date.now() < deadline) { try { if ((await fetch(url)).ok) return } catch {} if (host?.exitCode !== null) throw new Error(`Host exited before becoming available (${host.exitCode})`); await sleep(100) } throw new Error(`Host unavailable: ${url}`) }
 function sleep(ms) { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)) }
 function once(socket, event) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), 15_000); socket.once(event, (payload) => { clearTimeout(timer); resolvePromise(payload) }) }) }
