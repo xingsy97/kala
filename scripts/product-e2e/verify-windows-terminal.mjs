@@ -201,7 +201,9 @@ async function verifyExecutorLifecycle() {
       const stage = /Unable to create Windows removal task/u.test(uninstall.stderr) ? 'register' : /Unable to start Windows removal task/u.test(uninstall.stderr) ? 'run' : /did not confirm startup/u.test(uninstall.stderr) ? 'startup-timeout' : /failed during startup/u.test(uninstall.stderr) ? 'startup-failed' : 'unknown'
       const code = uninstall.stderr.match(/\b(?:0x[0-9a-f]{8}|2147[0-9]{6})\b/iu)?.[0] ?? 'none'
       const failure = /XML/u.test(uninstall.stderr) ? 'xml' : /[Aa]ccess is denied/u.test(uninstall.stderr) ? 'access-denied' : /file specified could not be found|cannot find the file/u.test(uninstall.stderr) ? 'missing-file' : 'other'
-      throw new Error(`Windows service uninstall was not scheduled; code=${uninstall.code}; stage=${stage}; failure=${failure}; taskErrorCode=${code}; stdoutBytes=${Buffer.byteLength(uninstall.stdout)}; stderrBytes=${Buffer.byteLength(uninstall.stderr)}`)
+      const xmlPosition = uninstall.stderr.match(/\((\d+),(\d+)\)/u)?.slice(1).join(':') ?? 'none'
+      const xmlReason = /malformed/iu.test(uninstall.stderr) ? 'malformed' : /incorrectly formatted|out of range/iu.test(uninstall.stderr) ? 'value' : /unexpected node/iu.test(uninstall.stderr) ? 'unexpected-node' : /missing|required/iu.test(uninstall.stderr) ? 'missing-node' : 'other'
+      throw new Error(`Windows service uninstall was not scheduled; code=${uninstall.code}; stage=${stage}; failure=${failure}; xmlReason=${xmlReason}; xmlPosition=${xmlPosition}; taskErrorCode=${code}; stdoutBytes=${Buffer.byteLength(uninstall.stdout)}; stderrBytes=${Buffer.byteLength(uninstall.stderr)}`)
     }
     const removalStatus = join(tmpdir(), statusName)
     const uninstallDeadline = Date.now() + 60_000
