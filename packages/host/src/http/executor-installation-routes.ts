@@ -16,6 +16,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
   auth?: AuthConfig
   tenancy: PlatformTenancy
   audit?: AuditLogger
+  windowsReleaseAssetsReady?: () => boolean
 }): void {
   const claimAttempts = new Map<string, { count: number; resetAt: number }>()
   server.on('request', (req, res) => {
@@ -25,7 +26,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
     if ((path === '/install' || path === '/install.ps1') && req.method === 'GET') {
       claimRoute(req)
       const shell = path === '/install'
-      if (!shell) { sendError(res, 410, 'windows_installation_unsupported'); return }
+      if (!shell && !options.windowsReleaseAssetsReady?.()) { sendError(res, 410, 'windows_release_assets_unavailable'); return }
       const origin = requestOrigin(req)
       if (!isSecureInstallRequest(req, origin)) { sendError(res, 400, 'https_required'); return }
       const body = shell ? renderShellBootstrap(origin) : renderPowerShellBootstrap(origin)
@@ -96,7 +97,7 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       if (!id && req.method === 'POST') {
         void readJson(req).then((body) => {
           const input = schema.CreateExecutorInstallSchema.parse(body)
-          if (input.platform === 'windows') { sendError(res, 422, 'windows_installation_unsupported'); return }
+          if (input.platform === 'windows' && !options.windowsReleaseAssetsReady?.()) { sendError(res, 422, 'windows_release_assets_unavailable'); return }
           const created = options.store.create(input, scopedIdempotencyKey(header(req, 'idempotency-key'), authorization.actor), tenantAttribution(authorization.actor))
           const origin = requestOrigin(req)
           const command = installCommand(origin, input.platform, input.mode, created.setupCode)
@@ -246,33 +247,6 @@ try {
   Write-Host 'Kala Executor setup'
   Write-Host '[1/4] Downloading verified installer...'
   Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/install-executor.ps1`)} -OutFile $installer
-  if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-    $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-    $target = switch ($architecture.ToLowerInvariant()) { 'amd64' { 'win32-x64' } 'x64' { 'win32-x64' } 'arm64' { 'win32-arm64' } default { throw "Unsupported Windows architecture: $architecture" } }
-    $sums = (Invoke-WebRequest -UseBasicParsing -Uri ${quotePs(`${origin}/install/assets/SHA256SUMS`)}).Content
-    $hasNative = $sums -match "(?m)^[0-9a-fA-F]{64}  kala-executor-$([regex]::Escape($target))\\.exe$"
-    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-    $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
-    if (-not $hasNative -and (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.')) {
-      $installChoice = $env:KALA_INSTALL_NODE
-      if ([string]::IsNullOrWhiteSpace($installChoice)) {
-        Write-Host ''
-        Write-Host 'Kala needs Node.js 22+ because this release has no native Windows Executor.'
-        $installChoice = Read-Host 'Install the official Node.js LTS package with Windows Package Manager (winget)? [y/N]'
-      }
-      if ($installChoice -notmatch '^(?i:y|yes|1|true)$') { throw 'Node.js installation was not approved. The setup code was not consumed. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
-      $winget = Get-Command winget -ErrorAction SilentlyContinue
-      if (-not $winget) { throw 'Windows Package Manager (winget) is unavailable. The setup code was not consumed. Install Node.js 22+ from https://nodejs.org/ and run this command again.' }
-      Write-Host 'Installing the official Node.js LTS package with winget...'
-      & $winget.Source install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements --silent
-      if ($LASTEXITCODE -ne 0) { throw "winget failed to install Node.js LTS (exit code $LASTEXITCODE). The setup code was not consumed." }
-      $env:Path = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join [IO.Path]::PathSeparator
-      $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
-      $nodeVersion = if ($nodeCommand) { & $nodeCommand.Source --version 2>$null } else { '' }
-      if (-not $nodeCommand -or $nodeVersion -notmatch '^v(2[2-9]|[3-9][0-9])\\.') { throw 'Node.js was installed but Node.js 22+ is not available in this PowerShell session. The setup code was not consumed; open a new PowerShell window and run this command again.' }
-      Write-Host "Node.js $nodeVersion installed successfully."
-    }
-  }
   Write-Host '[2/4] Validating setup code...'
   $claim = Invoke-RestMethod -Method Post -ContentType 'application/json' -Headers @{ Accept = 'application/json' } -Body (@{ setupCode = $code } | ConvertTo-Json -Compress) -Uri ${quotePs(`${origin}/install/session`)}
   if ($null -eq $claim -or $null -eq $claim.env) { throw 'Kala Host returned an invalid installation session' }
