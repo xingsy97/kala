@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ToolDispatcher } from '../loop-types.js'
 import { SessionStore } from '../store/session.js'
-import { snapshotSidecarPath } from '../store/log.js'
+import { findSessionOperation, readSessionLog, snapshotSidecarPath } from '../store/log.js'
+import { messageOperationFingerprint } from '../message-operation-fingerprint.js'
 import { CopilotAgentRuntime } from './copilot-runtime.js'
 import { MessageAttachmentStore } from '../message-attachment-store.js'
 
@@ -528,6 +529,7 @@ describe('Copilot runtime custom tools', () => {
     })
 
     await runtime.send(record, {
+      operationId: 'fingerprinted-image',
       text: 'Describe this screenshot.',
       content: [
         { type: 'text', text: 'Describe this screenshot.' },
@@ -542,6 +544,18 @@ describe('Copilot runtime custom tools', () => {
       ],
     })
     await vi.waitFor(() => expect(store.get(record.sessionId)?.state.status).toBe('done'))
+    const lookup = await findSessionOperation(record.logPath, 'fingerprinted-image')
+    expect(lookup).toMatchObject({
+      kind: 'runtime_metadata',
+      action: 'copilot.user_message',
+      requestFingerprint: messageOperationFingerprint('Describe this screenshot.', [
+        { type: 'text', text: 'Describe this screenshot.' },
+        { type: 'image', source: { kind: 'base64', mediaType: 'image/png', data: 'iVBORw0KGgo=' } },
+      ]),
+    })
+    const history = await readSessionLog(record.logPath, { allowExternalRuntime: true })
+    const userProjection = history.runtimeMetadata.find((entry) => entry.action === 'copilot.user_message')
+    expect(JSON.stringify(userProjection?.payload)).not.toContain('iVBORw0KGgo=')
 
     expect(sdk.sentMessages).toContainEqual(expect.objectContaining({
       prompt: 'Describe this screenshot.',

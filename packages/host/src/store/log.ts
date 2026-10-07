@@ -422,7 +422,7 @@ async function assertFullSessionReadAllowed(
 
 export type SessionOperationMatch =
   | { kind: 'event'; cursor: number; event: Extract<AgentEvent, { kind: 'user_message' }> }
-  | { kind: 'runtime_metadata' }
+  | { kind: 'runtime_metadata'; action: string; text?: string; requestFingerprint?: string }
 
 export async function findLatestEventEntry(
   path: string,
@@ -496,7 +496,12 @@ export async function findSessionOperation(
             return { kind: 'event', cursor: entry.seq, event: entry.event }
           }
           if (entry.kind === 'runtime_metadata' && entry.payload.operationId === operationId) {
-            return { kind: 'runtime_metadata' }
+            return {
+              kind: 'runtime_metadata',
+              action: entry.action,
+              ...(typeof entry.payload.text === 'string' ? { text: entry.payload.text } : {}),
+              ...(typeof entry.payload.requestFingerprint === 'string' ? { requestFingerprint: entry.payload.requestFingerprint } : {}),
+            }
           }
         }
         match = data.lastIndexOf(needle, match - 1)
