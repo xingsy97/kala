@@ -12,8 +12,11 @@ const tag = required('--tag')
 const revision = required('--revision')
 const manifest = json(join(directory, 'manifest.json'))
 const targets = [...requiredReleaseEvidence.portable.targets]
+const nativeExecutorAssets = targets.map((target) => target === 'win32-x64' ? 'kala-executor-win32-x64.exe' : `kala-executor-${target}`)
+const windowsAssets = ['node-pty-win32-x64.tar.gz', 'install-executor.ps1']
 const expectedAssets = [
-  ...targets.map((target) => `kala-executor-${target}`),
+  ...nativeExecutorAssets,
+  ...windowsAssets,
   ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
   'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
   'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
@@ -26,11 +29,11 @@ if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('curre
 assertUnique(manifest.assets, 'current release manifest assets')
 if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact checksummed assets')
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {
-  fail('current release manifest does not contain exactly the three supported native Executor targets')
+  fail('current release manifest does not contain exactly the four supported native Executor targets')
 }
 const expectedNativeAssets = {
   'kala-host': [], 'kala-runtime': [],
-  'kala-executor': targets.map((target) => `kala-executor-${target}`),
+  'kala-executor': nativeExecutorAssets,
   'kala-dedicated-ingress': [], 'kala-dedicated-deploy-supervisor': [],
 }
 if (JSON.stringify(manifest.nativeAssets) !== JSON.stringify(expectedNativeAssets)) fail('candidate contains unexpected native binaries')
@@ -56,6 +59,12 @@ for (const target of targets) {
   if (!manifest.assets.includes(name)) fail(`current release manifest is missing accepted Portable CJS asset ${name}`)
   if (digest(readFileSync(join(directory, name))) !== record.artifact.sha256) {
     fail(`current release asset ${name} differs from its validated acceptance evidence`)
+  }
+  if (target === 'win32-x64') {
+    for (const accepted of record.artifacts) {
+      if (!manifest.assets.includes(accepted.name)) fail(`current release manifest is missing accepted Windows asset ${accepted.name}`)
+      if (digest(readFileSync(join(directory, accepted.name))) !== accepted.sha256) fail(`current release asset ${accepted.name} differs from its validated acceptance evidence`)
+    }
   }
 }
 console.log(`verified closed promotion candidate for ${tag} at ${revision}`)

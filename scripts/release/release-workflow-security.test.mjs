@@ -77,9 +77,11 @@ test('release workflow publishes archived metadata and verifies the signed Execu
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
   assert.match(workflow, /optional-host-native:[\s\S]*workflow_dispatch[\s\S]*--component host[\s\S]*name: optional-host-qualification-/u)
   assert.match(workflow, /native-assets:[\s\S]*--component executor[\s\S]*name: native-/u)
+  assert.match(workflow, /windows-assets:[\s\S]*runs-on: windows-latest[\s\S]*--component all[\s\S]*--native-target win32-x64/u)
+  assert.match(workflow, /windows-capture-manifest\.json[\s\S]*Windows capture checksum mismatch/u)
+  assert.match(workflow, /subject-path: release\/\*/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
-  assert.match(workflow, /subject-path:[\s\S]*release\/kala-release-metadata\.tar\.gz/u)
   assert.equal(workflow.match(/reconcile-github-release-assets\.mjs[^\n]+--preserve-private-cloud-assets/g)?.length, 2)
   assert.doesNotMatch(workflow, /notes-file release\/RELEASE_NOTES\.md/u)
   assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
@@ -90,7 +92,9 @@ test('RC promotion binds acceptance to the tag ref exposed by the Actions API', 
   assert.match(workflow, /--jq \.head_branch\)" = "\$TAG"/u)
   assert.doesNotMatch(workflow, /--jq \.inputs\.tag/u)
   assert.match(workflow, /verify-rc-evidence\.mjs[\s\S]*--tag "\$TAG" --revision/u)
-  assert.match(workflow, /for target in linux-x64 linux-arm64; do[\s\S]*cosign verify-blob[\s\S]*tar -xOzf "\$archive" \.\/manifest\.json[\s\S]*rm -- "\$archive" "\$signature"[\s\S]*verify-promotion-candidate\.mjs/u)
+  assert.match(workflow, /for target in linux-x64; do[\s\S]*cosign verify-blob[\s\S]*tar -xOzf "\$archive" \.\/manifest\.json[\s\S]*rm -- "\$archive" "\$signature"[\s\S]*verify-promotion-candidate\.mjs/u)
+  assert.match(workflow, /kala-executor-win32-x64\.exe[\s\S]*node-pty-win32-x64\.tar\.gz install-executor\.ps1/u)
+  assert.doesNotMatch(workflow, /Windows release asset is not allowed/u)
 })
 
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {
@@ -126,7 +130,7 @@ fs.writeFileSync(process.env.GH_STATE, JSON.stringify(assets));
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
 
-test('promotion verifier binds the closed current draft to three accepted Portable CJS hashes', () => {
+test('promotion verifier binds the closed current draft to four accepted Portable records and exact Windows hashes', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'promotion-candidate-'))
   try {
     const candidate = join(temporary, 'candidate')
@@ -136,9 +140,11 @@ test('promotion verifier binds the closed current draft to three accepted Portab
     const tag = 'v1.2.3-rc.1'
     const revision = 'a'.repeat(40)
     const targets = [...requiredReleaseEvidence.portable.targets]
-    const nativeAssets = targets.map((target) => `kala-executor-${target}`)
+    const nativeAssets = targets.map((target) => target === 'win32-x64' ? 'kala-executor-win32-x64.exe' : `kala-executor-${target}`)
+    const windowsAssets = ['node-pty-win32-x64.tar.gz', 'install-executor.ps1']
     const assets = [
       ...nativeAssets,
+      ...windowsAssets,
       ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
       'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
       'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
@@ -156,10 +162,13 @@ test('promotion verifier binds the closed current draft to three accepted Portab
     writeChecksums(candidate, [...assets, 'manifest.json'])
     for (const target of targets) {
       const name = 'kala-dashboard-with-runtime.cjs'
-      const checks = Object.fromEntries(requiredReleaseEvidence.portable.checks.map((check) => [check, true]))
+      const windowsNames = [name, 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz', 'install-executor.ps1', 'kala-copilot-runtime-win32-x64', 'kala-copilot-runtime-node-win32-x64.node']
+      const checkNames = requiredReleaseEvidence.portable.targetChecks?.[target] ?? requiredReleaseEvidence.portable.checks
+      const checks = Object.fromEntries(checkNames.map((check) => [check, true]))
       writeFileSync(join(evidence, `${target}.rc-evidence.json`), JSON.stringify({
         schemaVersion: 1, category: 'portable', tag, version: tag.slice(1), revision, target,
         artifact: { name, sha256: digest(readFileSync(join(candidate, name))) },
+        ...(target === 'win32-x64' ? { artifacts: windowsNames.map((assetName) => ({ name: assetName, sha256: digest(readFileSync(join(candidate, assetName))) })) } : {}),
         ok: true, checks, generatedAt: '2026-01-01T00:00:00.000Z',
       }))
     }

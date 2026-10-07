@@ -5,9 +5,9 @@ import test from 'node:test'
 const revision = 'a'.repeat(40)
 const tag = 'v0.2.0-rc.1'
 
-test('requires exactly three Linux and macOS Portable targets', () => {
+test('requires exactly four Linux, macOS, and Windows Portable targets', () => {
   const portable = requiredReleaseEvidence.portable.targets.map((target) => create('portable', target))
-  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 3)
+  assert.equal(verifyRcEvidenceSet(portable, { tag, revision }).length, 4)
   assert.throws(() => create('portable', 'linux-arm64'), /unsupported portable evidence target/u)
   assert.throws(() => verifyRcEvidenceSet([...portable, create('dedicated', 'linux-x64-systemd')], { tag, revision }), /unexpected targets/u)
   assert.throws(() => verifyRcEvidenceSet(portable.slice(1), { tag, revision }), /matrix is incomplete/u)
@@ -36,10 +36,20 @@ test('rejects diagnostics, private locations, URLs, and sensitive fields', () =>
 })
 
 function create(category, target) {
+  const windowsNames = [
+    'kala-dashboard-with-runtime.cjs', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz',
+    'install-executor.ps1', 'kala-copilot-runtime-win32-x64', 'kala-copilot-runtime-node-win32-x64.node',
+  ]
+  const windows = category === 'portable' && target === 'win32-x64'
+  const artifact = windows ? { name: windowsNames[0], sha256: 'b'.repeat(64) } : { name: category + '-' + target + '.tar.gz', sha256: 'b'.repeat(64) }
+  const checks = windows
+    ? requiredReleaseEvidence.portable.targetChecks[target]
+    : requiredReleaseEvidence[category].checks
   return createRcEvidence({
     category, target, tag, version: tag.slice(1), revision, ok: true,
-    artifact: { name: category + '-' + target + '.tar.gz', sha256: 'b'.repeat(64) },
-    checks: Object.fromEntries(requiredReleaseEvidence[category].checks.map((name) => [name, true])),
+    artifact,
+    ...(windows ? { artifacts: windowsNames.map((name) => ({ name, sha256: 'b'.repeat(64) })) } : {}),
+    checks: Object.fromEntries(checks.map((name) => [name, true])),
     generatedAt: '2026-08-21T00:00:00.000Z',
   })
 }

@@ -80,16 +80,16 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
   assert.doesNotMatch(ps1, /ALLOW_UNSIGNED|winget|kala-executor\.cjs/iu)
 })
 
-test('release builder emits the three-target RC manifest while preserving installer platform capabilities', () => {
+test('release builder emits the four-target RC manifest with the Windows native installer', () => {
   const builder = readFileSync(new URL('./build-release-assets.mjs', import.meta.url), 'utf8')
   assert.match(builder, /sourceSnapshotSha256/u)
   assert.match(builder, /release source changed while assets were being built/u)
   assert.match(builder, /bootstrapAssets\.push\('run\.sh'\)/)
   assert.doesNotMatch(builder, /install-executor\.sh|generateExecutorInstallerSh/)
-  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64'\]/)
+  assert.match(builder, /const nativeTargets = \['linux-x64', 'darwin-x64', 'darwin-arm64', WINDOWS_EXECUTOR_TARGET\]/)
   assert.match(builder, /name: 'kala-executor'/)
   assert.doesNotMatch(builder, /legacyExecutorNativeAssetName|runlab-executor/)
-  assert.match(builder, /const supportedNativeBuildTargets = \[\.\.\.nativeTargets, WINDOWS_EXECUTOR_TARGET\]/)
+  assert.match(builder, /const supportedNativeBuildTargets = nativeTargets/)
   assert.match(builder, /packageWindowsNodePtyCompanion/)
   assert.match(builder, /generateExecutorInstallerPowerShell/)
   assert.match(builder, /Windows native release builds are Executor-only; Portable Host remains a Node\.js 22\+ CJS asset/)

@@ -5,8 +5,11 @@ export const RC_EVIDENCE_SCHEMA_VERSION = 1
 
 export const requiredReleaseEvidence = Object.freeze({
   portable: Object.freeze({
-    targets: Object.freeze(['linux-x64', 'darwin-x64', 'darwin-arm64']),
+    targets: Object.freeze(['linux-x64', 'darwin-x64', 'darwin-arm64', 'win32-x64']),
     checks: Object.freeze(['assetIntegrity', 'cleanInstall', 'boot', 'capabilities', 'dashboard', 'statePersistence', 'cleanStop', 'reinstall']),
+    targetChecks: Object.freeze({
+      'win32-x64': Object.freeze(['assetIntegrity', 'cleanInstall', 'boot', 'capabilities', 'dashboard', 'cleanStop', 'hostNode22', 'nativeExecutor', 'temporaryConptyLifecycle', 'serviceConptyLifecycle']),
+    }),
   }),
   dedicated: Object.freeze({
     targets: Object.freeze(['linux-x64-systemd']),
@@ -18,7 +21,15 @@ export const requiredReleaseEvidence = Object.freeze({
   }),
 })
 
-const topLevelFields = new Set(['schemaVersion', 'category', 'tag', 'version', 'revision', 'target', 'artifact', 'ok', 'checks', 'generatedAt'])
+const topLevelFields = new Set(['schemaVersion', 'category', 'tag', 'version', 'revision', 'target', 'artifact', 'artifacts', 'ok', 'checks', 'generatedAt'])
+const windowsPortableArtifacts = Object.freeze([
+  'kala-dashboard-with-runtime.cjs',
+  'kala-executor-win32-x64.exe',
+  'node-pty-win32-x64.tar.gz',
+  'install-executor.ps1',
+  'kala-copilot-runtime-win32-x64',
+  'kala-copilot-runtime-node-win32-x64.node',
+])
 const sensitiveKey = /(?:token|secret|password|credential|api.?key|private.?key|session.?log|receipt|screenshot|domain|endpoint|origin|address|ip|path|directory|root)$/iu
 const absolutePath = /(?:^|[\s=:])(?:[A-Za-z]:[\\/]|\/(?:home|Users|var|etc|opt|srv|tmp|run)\/)/u
 const urlOrIp = /(?:https?:\/\/|(?:^|[^0-9])(?:\d{1,3}\.){3}\d{1,3}(?:[^0-9]|$))/iu
@@ -33,6 +44,7 @@ export function createRcEvidence(input) {
     revision: input.revision,
     target: input.target,
     artifact: input.artifact,
+    ...(input.artifacts ? { artifacts: input.artifacts } : {}),
     ok: input.ok,
     checks: input.checks,
     generatedAt: input.generatedAt ?? new Date().toISOString(),
@@ -51,14 +63,25 @@ export function validateRcEvidence(value, expected = {}) {
   if (!/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/u.test(value.tag)) throw new Error('release evidence tag is invalid')
   if (value.version !== value.tag.slice(1)) throw new Error('release evidence version does not match tag')
   if (!/^[0-9a-f]{40}$/u.test(value.revision)) throw new Error('release evidence revision must be an exact Git revision')
-  if (!plainObject(value.artifact)) throw new Error('release evidence artifact must be an object')
-  rejectUnknown(value.artifact, new Set(['name', 'sha256']), 'release evidence artifact')
-  if (typeof value.artifact.name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/u.test(value.artifact.name)) throw new Error('release evidence artifact name is invalid')
-  if (!/^[0-9a-f]{64}$/u.test(value.artifact.sha256)) throw new Error('release evidence artifact SHA-256 is invalid')
+  validateArtifact(value.artifact, 'release evidence artifact')
+  const targetChecks = policy.targetChecks?.[value.target]
+  const requiredChecks = targetChecks ?? policy.checks
+  if (value.category === 'portable' && value.target === 'win32-x64') {
+    if (!Array.isArray(value.artifacts)) throw new Error('Windows Portable evidence must bind the complete release asset set')
+    value.artifacts.forEach((artifact, index) => validateArtifact(artifact, `Windows Portable evidence artifact ${index}`))
+    const names = value.artifacts.map((artifact) => artifact.name)
+    if (new Set(names).size !== names.length || JSON.stringify([...names].sort()) !== JSON.stringify([...windowsPortableArtifacts].sort())) {
+      throw new Error('Windows Portable evidence asset inventory is not exact')
+    }
+    const host = value.artifacts.find((artifact) => artifact.name === value.artifact.name)
+    if (!host || host.sha256 !== value.artifact.sha256 || value.artifact.name !== 'kala-dashboard-with-runtime.cjs') throw new Error('Windows Portable primary artifact is not bound to its asset inventory')
+  } else if (value.artifacts !== undefined) {
+    throw new Error('release evidence artifacts are only supported for Windows Portable acceptance')
+  }
   if (value.ok !== true) throw new Error('release evidence is not successful')
   if (!plainObject(value.checks)) throw new Error('release evidence checks must be an object')
-  rejectUnknown(value.checks, new Set(policy.checks), value.category + ' checks')
-  for (const check of policy.checks) if (value.checks[check] !== true) throw new Error(value.category + '/' + value.target + ' did not prove ' + check)
+  rejectUnknown(value.checks, new Set(requiredChecks), value.category + ' checks')
+  for (const check of requiredChecks) if (value.checks[check] !== true) throw new Error(value.category + '/' + value.target + ' did not prove ' + check)
   if (typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))) throw new Error('release evidence generatedAt is invalid')
   if (expected.tag && value.tag !== expected.tag) throw new Error('release evidence tag mismatch: ' + value.tag)
   if (expected.revision && value.revision !== expected.revision) throw new Error('release evidence revision mismatch: ' + value.revision)
@@ -101,6 +124,13 @@ function scanPrivacy(value, key = '') {
   if (typeof value === 'string' && (absolutePath.test(value) || urlOrIp.test(value) || credentialMaterial.test(value))) throw new Error('release evidence contains private diagnostic material in ' + (key || 'value'))
   if (Array.isArray(value)) for (const item of value) scanPrivacy(item, key)
   else if (plainObject(value)) for (const [childKey, item] of Object.entries(value)) scanPrivacy(item, childKey)
+}
+
+function validateArtifact(value, label) {
+  if (!plainObject(value)) throw new Error(label + ' must be an object')
+  rejectUnknown(value, new Set(['name', 'sha256']), label)
+  if (typeof value.name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/u.test(value.name)) throw new Error(label + ' name is invalid')
+  if (!/^[0-9a-f]{64}$/u.test(value.sha256)) throw new Error(label + ' SHA-256 is invalid')
 }
 
 function rejectUnknown(value, allowed, label) {

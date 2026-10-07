@@ -41,15 +41,9 @@ jobs:
               -f branch="$TAG" -f event=push -f status=success -f per_page=100 \
               --jq '.workflow_runs[].head_sha' | awk -v revision="$REVISION" '$0 == revision { found=1 } END { exit !found }'
           done
-          mapfile -t release_assets < <(gh release view "$TAG" --json assets --jq '.assets[].name')
-          for asset in "${release_assets[@]}"; do
-            case "${asset,,}" in
-              *.ps1|*.exe|*.msi|*.dll|*win32*|*windows*|*conpty*|*winpty*)
-                echo "Windows release asset is not allowed: $asset" >&2
-                exit 1
-                ;;
-            esac
-          done
+          # The closed-set promotion verifier checks every filename and digest
+          # after download. In particular the six required Windows release
+          # assets must not be rejected by the old three-platform policy.
       - name: Download and fail-closed verify the complete evidence matrix
         env: { GH_TOKEN: '${{ github.token }}', RUN_ID: '${{ inputs.acceptance_run_id }}', TAG: '${{ inputs.tag }}' }
         run: |
@@ -71,10 +65,10 @@ jobs:
           CANDIDATE=$(mktemp -d)
           gh release download "$TAG" --dir "$CANDIDATE"
           REVISION=$(git rev-parse HEAD)
-          # The core release owns the exact 27-asset manifest. Verify the separately
+          # The core release owns the exact four-platform manifest. Verify the separately
           # signed Private Cloud assets before removing them from this disposable
           # download directory so core manifest closure remains strict.
-          for target in linux-x64 linux-arm64; do
+          for target in linux-x64; do
             archive="$CANDIDATE/kala-private-cloud-${TAG#v}-$target.tar.gz"
             signature="$CANDIDATE/private-cloud-$target.sigstore.json"
             test -s "$archive" && test -s "$signature"
@@ -88,15 +82,18 @@ jobs:
           node scripts/release/verify-promotion-candidate.mjs \
             --directory "$CANDIDATE" --evidence acceptance/evidence \
             --aggregate release-evidence/rc-evidence.json --tag "$TAG" --revision "$REVISION"
-          # Paused for the current release: kala-host-linux-arm64
           for asset in manifest.json SHA256SUMS \
-            kala-host-linux-x64 \
-            kala-host-darwin-x64 kala-host-darwin-arm64; do
+            kala-executor-linux-x64 kala-executor-darwin-x64 \
+            kala-executor-darwin-arm64 kala-executor-win32-x64.exe \
+            node-pty-win32-x64.tar.gz install-executor.ps1 \
+            kala-dashboard-with-runtime.cjs \
+            kala-copilot-runtime-win32-x64 \
+            kala-copilot-runtime-node-win32-x64.node; do
             gh attestation verify "$CANDIDATE/$asset" --repo "$GITHUB_REPOSITORY"
           done
           cosign verify-blob \
             --bundle "$CANDIDATE/SHA256SUMS.sigstore.json" \
-            --certificate-identity-regexp "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@.*" \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@refs/tags/$TAG" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$CANDIDATE/SHA256SUMS"
           test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
