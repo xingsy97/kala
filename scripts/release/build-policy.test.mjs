@@ -49,9 +49,9 @@ test('release builders remove native scratch files and verification rejects unde
   assert.match(verifier, /inspectDedicatedSupportBundle/)
 })
 
-test('both full and native-only SEA Executor builds resolve adjacent native addons', () => {
+test('only explicitly requested SEA Executor builds resolve adjacent native addons', () => {
   const builder = read('scripts/release/build-release-assets.mjs')
-  assert.match(builder, /const wantsNativeBuild = !finalizeOnly && \(nativeOnly \|\| !noNative\)/)
+  assert.match(builder, /const wantsNativeBuild = !finalizeOnly && nativeOnly/)
   assert.match(builder, /const nativeRequire = wantsNativeBuild && item\.role === 'executor'/)
   assert.match(builder, /createRequire\(__filename\)/)
   assert.match(builder, /\$\{nativeRequire\}\$\{buildInfo\}/)
@@ -78,6 +78,13 @@ test('Dashboard release manifest materializes the file iterator before mapping a
   const builder = read('scripts/release/build-release-assets.mjs')
   assert.ok(builder.includes('const files = [...walkFiles(dir)].map'))
   assert.ok(!builder.includes('const files = walkFiles(dir).map'))
+})
+
+test('Dashboard release protocol range follows the shared wire protocol version', () => {
+  const builder = read('scripts/release/build-release-assets.mjs')
+  assert.match(builder, /await import\(pathToFileURL\(join\(root, 'packages\/shared\/dist\/index\.js'\)\)\.href\)/)
+  assert.match(builder, /protocol: \{ min: PROTOCOL_VERSION, max: PROTOCOL_VERSION \}/)
+  assert.doesNotMatch(builder, /protocol: \{ min: '1\.0\.0', max: '1\.0\.0' \}/)
 })
 
 test('release verification rejects embedded Dashboard assignment without rejecting runtime feature detection', () => {

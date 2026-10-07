@@ -32,7 +32,7 @@ const actualNativeTargets = Array.isArray(manifest.nativeTargets) ? [...manifest
 if (!actualNativeTargets
   || (actualNativeTargets.length !== 0
     && JSON.stringify(actualNativeTargets) !== JSON.stringify([...supportedNativeTargets].sort()))) {
-  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly Linux x64 and macOS x64/arm64')
+  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the three supported Executor targets')
 }
 for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   if (!Array.isArray(assets)) fail(`manifest.nativeAssets.${product} must be an array`)
@@ -42,6 +42,16 @@ for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   }
 }
 const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const expectedNativeAssets = {
+  'kala-host': [],
+  'kala-runtime': [],
+  'kala-executor': targetsForInventory.map((target) => `kala-executor-${target}`),
+  'kala-dedicated-ingress': [],
+  'kala-dedicated-deploy-supervisor': [],
+}
+if (JSON.stringify(manifest.nativeAssets) !== JSON.stringify(expectedNativeAssets)) {
+  fail('manifest.nativeAssets must contain only the required native Executor assets')
+}
 const actualCopilotRuntimeTargets = Array.isArray(manifest.copilotRuntimeTargets)
   ? [...manifest.copilotRuntimeTargets].sort()
   : undefined
@@ -57,7 +67,7 @@ const copilotRuntimeAssets = actualCopilotRuntimeTargets.flatMap((target) => [
   `kala-copilot-runtime-node-${target}.node`,
 ])
 const expectedManifestAssets = [
-  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targetsForInventory.map((target) => `${name}-${target}`)),
+  ...expectedNativeAssets['kala-executor'],
   ...copilotRuntimeAssets,
   'kala-dashboard-with-runtime.cjs',
   'kala-runtime.cjs',
@@ -87,7 +97,7 @@ if (!copilotDependency || !copilotRuntimeDependency || !notices.includes('@githu
 }
 const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
 if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
-  fail('signed final release requires the signature bundle and all three native targets')
+  fail('signed final release requires the signature bundle and all three native Executor targets')
 }
 const expectedReleaseFiles = [...manifest.assets, 'manifest.json', 'SHA256SUMS', ...(signaturePresent ? ['SHA256SUMS.sigstore.json'] : [])].sort()
 const actualReleaseEntries = readdirSync(releaseDir, { withFileTypes: true })

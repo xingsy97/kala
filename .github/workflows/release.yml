@@ -98,7 +98,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
       - run: pnpm run build
-      - run: pnpm run build:release-assets -- --component ${{ needs.resolve.outputs.component }} --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
+      - run: pnpm run build:release-assets -- --component executor --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target ${{ matrix.target }}
       - uses: actions/upload-artifact@v5
         with:
           name: native-${{ matrix.target }}
@@ -164,7 +164,7 @@ jobs:
               --title "$TAG" \
               --notes-file "$metadata/RELEASE_NOTES.md"
           fi
-          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release --preserve-private-cloud-assets
 
   native-release:
     needs: [resolve, cjs-release, native-assets]
@@ -216,7 +216,7 @@ jobs:
       - uses: sigstore/cosign-installer@v3
       - name: Sign the checksum index with Sigstore keyless identity
         run: cosign sign-blob --yes --bundle release/SHA256SUMS.sigstore.json release/SHA256SUMS
-      - name: Verify exact signed 27-asset inventory
+      - name: Verify exact signed Executor-native inventory
         run: |
           pnpm run verify:release-assets -- --require-signed
           cosign verify-blob \
@@ -232,7 +232,7 @@ jobs:
             release/SHA256SUMS
             release/kala-release-metadata.tar.gz
             release/kala-dashboard-with-runtime.cjs
-            release/kala-host-*
+            release/kala-runtime.cjs
             release/kala-executor-*
       - name: Upload native assets and refreshed metadata
         env:
@@ -244,4 +244,4 @@ jobs:
           trap 'rm -rf "$metadata"' EXIT
           node scripts/release/extract-release-metadata.mjs release/kala-release-metadata.tar.gz "$metadata"
           gh release edit "$TAG" --draft --notes-file "$metadata/RELEASE_NOTES.md"
-          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release
+          node scripts/release/reconcile-github-release-assets.mjs --tag "$TAG" --directory release --preserve-private-cloud-assets

@@ -13,7 +13,7 @@ const revision = required('--revision')
 const manifest = json(join(directory, 'manifest.json'))
 const targets = [...requiredReleaseEvidence.portable.targets]
 const expectedAssets = [
-  ...['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor'].flatMap((name) => targets.map((target) => `${name}-${target}`)),
+  ...targets.map((target) => `kala-executor-${target}`),
   ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
   'kala-dashboard-with-runtime.cjs', 'kala-runtime.cjs', 'kala-executor.cjs', 'kala-dedicated-ingress.cjs', 'kala-dedicated-deploy-supervisor.cjs',
   'kala-dashboard.tar.gz', 'kala-docs.tar.gz', 'kala-dedicated-support.tar.gz', 'kala-release-metadata.tar.gz',
@@ -24,10 +24,16 @@ if (manifest.version !== tag.slice(1)) fail('current release manifest version do
 if (manifest.source?.revision !== revision) fail('current release manifest revision does not match the promoted revision')
 if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('current release manifest has no assets')
 assertUnique(manifest.assets, 'current release manifest assets')
-if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact 30 checksummed assets')
+if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact checksummed assets')
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {
-  fail('current release manifest does not contain exactly the three supported native targets')
+  fail('current release manifest does not contain exactly the three supported native Executor targets')
 }
+const expectedNativeAssets = {
+  'kala-host': [], 'kala-runtime': [],
+  'kala-executor': targets.map((target) => `kala-executor-${target}`),
+  'kala-dedicated-ingress': [], 'kala-dedicated-deploy-supervisor': [],
+}
+if (JSON.stringify(manifest.nativeAssets) !== JSON.stringify(expectedNativeAssets)) fail('candidate contains unexpected native binaries')
 
 const aggregateName = basename(aggregatePath)
 if (aggregateName !== 'rc-evidence.json') fail('aggregate evidence must be named rc-evidence.json')
@@ -39,15 +45,15 @@ const actualFiles = entries.map((entry) => entry.name).sort()
 if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
   fail(`current release inventory is not closed; expected ${JSON.stringify(expectedFiles)}, received ${JSON.stringify(actualFiles)}`)
 }
-if (aggregatePath.startsWith(`${directory}/`) || aggregatePath === directory) fail('aggregate evidence must remain outside the 27-asset release inventory')
+if (aggregatePath.startsWith(`${directory}/`) || aggregatePath === directory) fail('aggregate evidence must remain outside the signed release inventory')
 
 await verifyReleaseChecksums(directory, [...manifest.assets, 'manifest.json'])
 const evidence = verifyRcEvidenceSet(collectRcEvidence(evidenceDirectory), { tag, revision })
 for (const target of targets) {
   const record = evidence.find((entry) => entry.category === 'portable' && entry.target === target)
-  const name = `kala-host-${target}`
+  const name = 'kala-dashboard-with-runtime.cjs'
   if (!record || record.artifact.name !== name) fail(`validated ${target} evidence does not identify ${name}`)
-  if (!manifest.assets.includes(name)) fail(`current release manifest is missing accepted native asset ${name}`)
+  if (!manifest.assets.includes(name)) fail(`current release manifest is missing accepted Portable CJS asset ${name}`)
   if (digest(readFileSync(join(directory, name))) !== record.artifact.sha256) {
     fail(`current release asset ${name} differs from its validated acceptance evidence`)
   }

@@ -55,12 +55,29 @@ test('Private Cloud scanner preserves failure while collecting all three image r
   assert.match(workflow, /trivy image [^\n]+\|\| return 1/u)
 })
 
-test('release workflow publishes archived metadata and verifies the signed 27-asset set', () => {
+test('Private Cloud release retains image publishing and accepts the exact signed Compose candidate', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
+  for (const image of ['runtime-image:', 'ingress-image:', 'dashboard-image:']) assert.ok(workflow.includes(image))
+  assert.match(workflow, /gh release upload "\$TAG" "\$archive" "\$signature" --clobber/u)
+  assert.match(workflow, /gh release download "\$TAG"[\s\S]*cmp "\$archive"[\s\S]*cmp "\$signature"/u)
+  assert.match(workflow, /Transfer exact signed bundle[\s\S]*actions\/upload-artifact@v5[\s\S]*private-cloud-acceptance-input-/u)
+  const acceptance = workflow.slice(workflow.indexOf('  clean-compose-acceptance:'))
+  assert.match(acceptance, /needs: \[resolve, bundle\]/u)
+  assert.match(acceptance, /runs-on: \[self-hosted, linux, x64, private-cloud-clean\]/u)
+  assert.match(acceptance, /actions\/download-artifact@v5/u)
+  assert.equal((acceptance.match(/cosign verify-blob/g) ?? []).length, 3)
+  assert.match(acceptance, /git rev-parse "\$TAG\^\{commit\}"/u)
+  assert.match(acceptance, /verify-private-cloud-clean-compose\.mjs[\s\S]*--candidate-archive[\s\S]*--predecessor-archive[\s\S]*--predecessor-revision/u)
+  assert.match(acceptance, /private-cloud-clean-compose-evidence-/u)
+})
+
+test('release workflow publishes archived metadata and verifies the signed Executor-native inventory', () => {
   const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/release.yml'), 'utf8')
   assert.equal(workflow.match(/extract-release-metadata\.mjs release\/kala-release-metadata\.tar\.gz/g)?.length, 2)
-  assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
-  assert.match(workflow, /Verify exact signed 27-asset inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
+  assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
+  assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
   assert.match(workflow, /subject-path:[\s\S]*release\/kala-release-metadata\.tar\.gz/u)
+  assert.equal(workflow.match(/reconcile-github-release-assets\.mjs[^\n]+--preserve-private-cloud-assets/g)?.length, 2)
   assert.doesNotMatch(workflow, /notes-file release\/RELEASE_NOTES\.md/u)
   assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
 })
@@ -70,6 +87,7 @@ test('RC promotion binds acceptance to the tag ref exposed by the Actions API', 
   assert.match(workflow, /--jq \.head_branch\)" = "\$TAG"/u)
   assert.doesNotMatch(workflow, /--jq \.inputs\.tag/u)
   assert.match(workflow, /verify-rc-evidence\.mjs[\s\S]*--tag "\$TAG" --revision/u)
+  assert.match(workflow, /for target in linux-x64 linux-arm64; do[\s\S]*cosign verify-blob[\s\S]*tar -xOzf "\$archive" \.\/manifest\.json[\s\S]*rm -- "\$archive" "\$signature"[\s\S]*verify-promotion-candidate\.mjs/u)
 })
 
 test('release reconciliation deletes unrelated remote assets and proves exact local closure', () => {
@@ -105,7 +123,7 @@ fs.writeFileSync(process.env.GH_STATE, JSON.stringify(assets));
   } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
 
-test('promotion verifier binds the closed current draft to all three accepted native hashes', () => {
+test('promotion verifier binds the closed current draft to three accepted Portable CJS hashes', () => {
   const temporary = mkdtempSync(join(tmpdir(), 'promotion-candidate-'))
   try {
     const candidate = join(temporary, 'candidate')
@@ -115,8 +133,7 @@ test('promotion verifier binds the closed current draft to all three accepted na
     const tag = 'v1.2.3-rc.1'
     const revision = 'a'.repeat(40)
     const targets = [...requiredReleaseEvidence.portable.targets]
-    const nativeAssets = ['kala-host', 'kala-executor', 'kala-dedicated-ingress', 'kala-dedicated-deploy-supervisor']
-      .flatMap((name) => targets.map((target) => `${name}-${target}`))
+    const nativeAssets = targets.map((target) => `kala-executor-${target}`)
     const assets = [
       ...nativeAssets,
       ...targets.flatMap((target) => [`kala-copilot-runtime-${target}`, `kala-copilot-runtime-node-${target}.node`]),
@@ -125,13 +142,17 @@ test('promotion verifier binds the closed current draft to all three accepted na
       'run.sh', 'kala-dedicated.mjs', 'kala-model-catalog-seed.json',
     ]
     for (const [index, name] of assets.entries()) writeFileSync(join(candidate, name), `asset-${index}\n`)
-    writeFileSync(join(candidate, 'manifest.json'), JSON.stringify({ version: tag.slice(1), source: { revision }, nativeTargets: targets, assets }, null, 2) + '\n')
+    const nativeInventory = {
+      'kala-host': [], 'kala-runtime': [], 'kala-executor': nativeAssets,
+      'kala-dedicated-ingress': [], 'kala-dedicated-deploy-supervisor': [],
+    }
+    writeFileSync(join(candidate, 'manifest.json'), JSON.stringify({ version: tag.slice(1), source: { revision }, nativeTargets: targets, nativeAssets: nativeInventory, assets }, null, 2) + '\n')
     writeFileSync(join(candidate, 'SHA256SUMS.sigstore.json'), '{}\n')
     const aggregate = join(temporary, 'rc-evidence.json')
     writeFileSync(aggregate, '{"ok":true}\n')
     writeChecksums(candidate, [...assets, 'manifest.json'])
     for (const target of targets) {
-      const name = `kala-host-${target}`
+      const name = 'kala-dashboard-with-runtime.cjs'
       const checks = Object.fromEntries(requiredReleaseEvidence.portable.checks.map((check) => [check, true]))
       writeFileSync(join(evidence, `${target}.rc-evidence.json`), JSON.stringify({
         schemaVersion: 1, category: 'portable', tag, version: tag.slice(1), revision, target,
@@ -148,7 +169,7 @@ test('promotion verifier binds the closed current draft to all three accepted na
     assert.match(result.stderr, /inventory is not closed/u)
     unlinkSync(join(candidate, 'stale-debug.zip'))
 
-    writeFileSync(join(candidate, assets[0]), 'replaced-after-acceptance\n')
+    writeFileSync(join(candidate, 'kala-dashboard-with-runtime.cjs'), 'replaced-after-acceptance\n')
     writeChecksums(candidate, [...assets, 'manifest.json'])
     result = spawnSync(process.execPath, args, { encoding: 'utf8' })
     assert.notEqual(result.status, 0)
