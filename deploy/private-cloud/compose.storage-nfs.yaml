@@ -46,4 +46,4 @@ networks:
   nfs:
     ipam:
       config:
-        - subnet: ${KALA_NFS_SUBNET:-192.0.2.8/24}
+        - subnet: ${KALA_NFS_SUBNET:-192.0.2.0/24}

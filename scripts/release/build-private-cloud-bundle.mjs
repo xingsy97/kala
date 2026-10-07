@@ -14,28 +14,36 @@ const images = {
   dashboard: requiredImage('--dashboard-image'),
 }
 const operator = resolve(option('--operator') ?? join(root, 'scripts/deploy/kala-private-cloud.mjs'))
-const operatorName = option('--operator') ? 'kala-private-cloud' : 'kala-private-cloud.mjs'
+const operatorName = operator.endsWith('.mjs') ? 'kala-private-cloud.mjs' : 'kala-private-cloud'
 if (!/^[0-9a-f]{40}$/u.test(revision)) throw new Error('revision must be an exact 40-character Git revision')
 rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true, mode: 0o755 })
 const files = [
   'deploy/private-cloud/compose.yaml',
+  'deploy/private-cloud/compose.oidc-private-ca.yaml',
   'deploy/private-cloud/compose.storage-nfs.yaml',
   'deploy/private-cloud/compose.storage-external-nfs.yaml',
   'deploy/private-cloud/compose.storage-local.yaml',
   'deploy/private-cloud/compose.local.yaml',
   'deploy/private-cloud/compose.cloudflare.yaml',
+  'deploy/private-cloud/compose.identity-local.yaml',
+  'deploy/private-cloud/identity-local/Caddyfile',
+  'scripts/deploy/bootstrap-private-cloud-identity.mjs',
   'deploy/private-cloud/deployment.json',
   'deploy/private-cloud/local.env.example',
   'deploy/private-cloud/cloudflare.env.example',
   'deploy/private-cloud/local/runtime-provider-catalog.json',
 ]
-for (const source of files) copyFileSync(join(root, source), join(output, source.endsWith('/runtime-provider-catalog.json') ? 'runtime-provider-catalog.example.json' : basename(source)))
+function bundleName(source) { return source.endsWith('/runtime-provider-catalog.json') ? 'runtime-provider-catalog.example.json' : source.endsWith('/identity-local/Caddyfile') ? 'identity-local.Caddyfile' : basename(source) }
+for (const source of files) copyFileSync(join(root, source), join(output, bundleName(source)))
+// The Caddy image must be able to read the public proxy configuration even
+// when the source checkout created it with owner-only permissions.
+chmodSync(join(output, 'identity-local.Caddyfile'), 0o644)
 copyFileSync(operator, join(output, operatorName))
 chmodSync(join(output, operatorName), 0o755)
 const imageLock = { schemaVersion: 1, product: 'kala-private-cloud', version: pkg.version, revision, images }
 writeFileSync(join(output, 'image-lock.json'), `${JSON.stringify(imageLock, null, 2)}\n`)
-const names = files.map((source) => source.endsWith('/runtime-provider-catalog.json') ? 'runtime-provider-catalog.example.json' : basename(source)).concat('image-lock.json', operatorName).sort()
+const names = files.map(bundleName).concat('image-lock.json', operatorName).sort()
 const manifest = {
   schemaVersion: 1, product: 'kala-private-cloud', version: pkg.version, revision,
   files: Object.fromEntries(names.map((name) => [name, describe(join(output, name))])),

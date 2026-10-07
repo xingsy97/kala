@@ -24,6 +24,7 @@ createServer(async (request, response) => {
     if (!info.isFile() || info.isSymbolicLink() || !within(file)) { response.writeHead(404); response.end(); return }
     const immutable = file !== join(root, 'index.html') && /(?:^|[._-])[a-f0-9]{8,}(?:[._-]|$)/iu.test(file.slice(root.length + 1))
     response.writeHead(200, { 'content-type': types[extname(file).toLowerCase()] ?? 'application/octet-stream', 'content-length': String(info.size), 'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate', 'x-content-type-options': 'nosniff' })
-    if (request.method === 'HEAD') response.end(); else createReadStream(file).pipe(response)
+    if (request.method === 'HEAD') response.end()
+    else createReadStream(file).on('error', () => response.destroy()).pipe(response)
   } catch { if (!response.headersSent) response.writeHead(404); response.end() }
 }).listen(port, '0.0.0.0', () => process.stdout.write(`${JSON.stringify({ event: 'dashboard_ready', port })}\n`))

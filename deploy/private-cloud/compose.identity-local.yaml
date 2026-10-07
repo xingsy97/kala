@@ -1,0 +1,212 @@
+services:
+  identity-init:
+    image: alpine@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        umask 077
+        fail() { echo "identity secret validation failed: $$1" >&2; exit 1; }
+        [ "$$(stat -c '%a' /identity-secrets)" = 700 ] || fail 'directory mode must be 0700'
+        for name in postgres_password zitadel_masterkey initial_human_password; do
+          path="/identity-secrets/$$name"
+          [ -f "$$path" ] && [ ! -L "$$path" ] || fail "$$name must be a regular, non-symlink file"
+          case "$$(stat -c '%a' "$$path")" in 400|600) ;; *) fail "$$name mode must be 0400 or 0600" ;; esac
+          [ "$$(wc -c <"$$path")" = "$$(tr -d '\r\n' <"$$path" | wc -c)" ] || fail "$$name must not contain a newline"
+        done
+        [ "$$(wc -c </identity-secrets/zitadel_masterkey)" -eq 32 ] || fail 'zitadel_masterkey must contain exactly 32 bytes'
+        [ "$$(wc -c </identity-secrets/postgres_password)" -ge 16 ] || fail 'postgres_password must contain at least 16 bytes'
+        [ "$$(wc -c </identity-secrets/initial_human_password)" -ge 16 ] || fail 'initial_human_password must contain at least 16 bytes'
+        password_uri="$$(od -An -tx1 /identity-secrets/postgres_password | tr -d ' \n' | sed 's/../%&/g')"
+        human_password="$$(sed 's/\\/\\\\/g; s/"/\\"/g' /identity-secrets/initial_human_password)"
+        bootstrap_pat_expiration="$$(date -u -d "@$$(($$(date +%s) + 86400))" '+%Y-%m-%dT%H:%M:%SZ')"
+        mkdir -p /bootstrap /config
+        chown 1000:65533 /bootstrap
+        chmod 750 /bootstrap
+        chown 1000:1000 /config
+        chmod 700 /config
+        cat /identity-secrets/zitadel_masterkey > /config/masterkey
+        chown 1000:1000 /config/masterkey
+        chmod 400 /config/masterkey
+        cat > /config/runtime.yaml <<EOF
+        Database:
+          postgres:
+            DSN: "postgres://zitadel:$$password_uri@identity-postgres:5432/zitadel?sslmode=disable"
+        EOF
+        cat > /config/steps.yaml <<EOF
+        FirstInstance:
+          Org:
+            Machine:
+              Pat:
+                ExpirationDate: "$$bootstrap_pat_expiration"
+            Human:
+              UserName: "zitadel-admin"
+              Password: "$$human_password"
+              PasswordChangeRequired: true
+        EOF
+        chown 1000:1000 /config/runtime.yaml /config/steps.yaml
+        chmod 400 /config/runtime.yaml /config/steps.yaml
+    volumes:
+      - ${KALA_IDENTITY_SECRETS_DIR:?KALA_IDENTITY_SECRETS_DIR must point to a private identity secrets directory}:/identity-secrets:ro
+      - identity-zitadel-bootstrap:/bootstrap
+      - identity-zitadel-config:/config
+    networks: [identity]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    read_only: true
+
+  identity-postgres:
+    image: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zitadel
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD_FILE: /run/secrets/identity_postgres_password
+    secrets: [identity_postgres_password]
+    volumes:
+      - identity-postgres-data:/var/lib/postgresql/data
+    networks: [identity]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -d zitadel -U zitadel]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    pids_limit: 200
+    mem_limit: 768m
+    cpus: 1.0
+
+  identity-zitadel:
+    image: ghcr.io/zitadel/zitadel@sha256:15543f7a80c3e37905fe8c7db56af7ed2a9ece256704322c1449d7e8453afdab
+    restart: unless-stopped
+    command: [start-from-init, --config, /zitadel/config/runtime.yaml, --steps, /zitadel/config/steps.yaml, --masterkeyFile, /zitadel/config/masterkey, --tlsMode, disabled]
+    environment:
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: "${KALA_IDENTITY_PORT:-13002}"
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel/bootstrap/bootstrap.pat
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: kala-bootstrap
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Kala Private Cloud Bootstrap
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Kala Private Cloud Login Client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "true"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: http://localhost:${KALA_IDENTITY_PORT:-13002}/ui/v2/login
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: http://localhost:${KALA_IDENTITY_PORT:-13002}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: http://localhost:${KALA_IDENTITY_PORT:-13002}/ui/v2/login/logout?post_logout_redirect=
+    volumes:
+      - identity-zitadel-bootstrap:/zitadel/bootstrap
+      - identity-zitadel-config:/zitadel/config:ro
+    networks: [identity, edge]
+    depends_on:
+      identity-init: { condition: service_completed_successfully }
+      identity-postgres: { condition: service_healthy }
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    pids_limit: 300
+    mem_limit: 768m
+    cpus: 1.0
+
+  identity-zitadel-health:
+    image: alpine@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412
+    restart: unless-stopped
+    command: [/bin/sh, -c, "while sleep 30; do :; done"]
+    networks: [edge]
+    depends_on:
+      identity-zitadel: { condition: service_started }
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, --header, "Host: localhost:${KALA_IDENTITY_PORT:-13002}", http://identity-zitadel:8080/debug/healthz]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    pids_limit: 32
+    mem_limit: 32m
+    cpus: 0.1
+
+  identity-login:
+    image: ghcr.io/zitadel/zitadel-login@sha256:adeba50a8090d1484a312ac81e67cae5f839ba376e3325c00ec75fc79939a842
+    restart: unless-stopped
+    environment:
+      ZITADEL_API_URL: http://identity-zitadel:8080
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      CUSTOM_REQUEST_HEADERS: Host:localhost:${KALA_IDENTITY_PORT:-13002},X-Forwarded-Proto:http
+    volumes:
+      - identity-zitadel-bootstrap:/zitadel/bootstrap:ro
+    networks: [edge]
+    depends_on:
+      identity-zitadel-health: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, /usr/local/bin/node, /app/healthcheck.mjs, /ui/v2/login/healthy]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    pids_limit: 200
+    mem_limit: 512m
+    cpus: 1.0
+
+  identity-proxy:
+    image: caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    command: [caddy, run, --config, /etc/caddy/Caddyfile]
+    environment:
+      KALA_IDENTITY_HOST: localhost:${KALA_IDENTITY_PORT:-13002}
+    ports:
+      - 127.0.0.1:${KALA_IDENTITY_PORT:-13002}:8080
+    volumes:
+      - ./identity-local.Caddyfile:/etc/caddy/Caddyfile:ro
+    networks: [edge]
+    depends_on:
+      identity-zitadel-health: { condition: service_healthy }
+      identity-login: { condition: service_healthy }
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/debug/healthz]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    read_only: true
+    tmpfs:
+      - /config:rw,noexec,nosuid,size=16m
+      - /data:rw,noexec,nosuid,size=16m
+    pids_limit: 100
+    mem_limit: 128m
+    cpus: 0.5
+
+  runtime-ingress:
+    environment:
+      KALA_INGRESS_IDENTITY_ORIGIN: http://identity-proxy:8080
+      OIDC_ISSUER: http://localhost:${KALA_IDENTITY_PORT:-13002}
+    depends_on:
+      identity-proxy: { condition: service_healthy }
+
+networks:
+  identity:
+    internal: true
+  edge: {}
+
+volumes:
+  identity-postgres-data:
+  identity-zitadel-bootstrap:
+  identity-zitadel-config:
+
+secrets:
+  identity_postgres_password:
+    file: ${KALA_IDENTITY_SECRETS_DIR:?KALA_IDENTITY_SECRETS_DIR must point to a private identity secrets directory}/postgres_password

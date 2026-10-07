@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
+import { rootCertificates } from 'node:tls'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 
@@ -17,6 +20,8 @@ test('builds an exact digest-pinned source-free Private Cloud bundle', () => {
   assert.equal(JSON.parse(verified.stdout).ok, true)
   const compose = readFileSync(join(bundle, 'compose.yaml'), 'utf8')
   assert.doesNotMatch(compose, /^\s+build:/mu)
+  assert.match(compose, /edge: \{ gw_priority: 1 \}/u)
+  assert.match(compose, /egress: \{ gw_priority: 1 \}/u)
   assert.equal(readFileSync(join(bundle, 'image-lock.json'), 'utf8').includes(image('dashboard', 'c')), true)
   assert.equal(run(process.execPath, [join(bundle, 'kala-private-cloud.mjs'), '--help']).stdout.includes('upgrade-dashboard'), true)
 
@@ -26,19 +31,27 @@ test('builds an exact digest-pinned source-free Private Cloud bundle', () => {
   assert.match(rejected.stderr, /integrity failed/u)
 })
 
-test('installs, upgrades Dashboard independently, and rolls back from persisted predecessor', () => {
+test('installs, upgrades Dashboard independently, and rolls back from persisted predecessor', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'kala-private-cloud-operator-'))
   const first = join(scratch, 'first'); const second = join(scratch, 'second')
   const shared = { runtime: image('runtime', 'a'), ingress: image('ingress', 'b') }
   build(first, { ...shared, dashboard: image('dashboard', 'c') }, '1'.repeat(40))
   build(second, { ...shared, dashboard: image('dashboard', 'd') }, '2'.repeat(40))
-  const config = join(scratch, 'config'); mkdirSync(join(config, 'secrets'), { recursive: true })
-  copyFileSync(join(root, 'deploy/private-cloud/local/runtime-provider-catalog.json'), join(config, 'runtime-provider-catalog.json'))
-  writeFileSync(join(config, 'deployment.env'), 'KALA_PROFILE=local\nKALA_STORAGE=local-volume\nCOMPOSE_PROJECT_NAME=runlab-test\n')
+  const config = join(scratch, 'config'); mkdirSync(join(config, 'secrets'), { recursive: true, mode: 0o700 })
+  const catalog = JSON.parse(readFileSync(join(root, 'deploy/private-cloud/local/runtime-provider-catalog.json'), 'utf8'))
+  for (const provider of catalog.providers) provider.baseUrl = 'https://model.example.test/v1'
+  writeFileSync(join(config, 'runtime-provider-catalog.json'), JSON.stringify(catalog), { mode: 0o600 })
+  for (const name of ['control_postgres_password', 'session_secret', 'ingress_secret', 'oidc_client_id', 'oidc_client_secret', 'llm_api_key', 'internal_ca_key.pem', 'internal_ca.pem', 'runtime_host_key.pem', 'runtime_host.pem', 'ingress_client_key.pem', 'ingress_client.pem', 'runtime_health_key.pem', 'runtime_health.pem']) writeFileSync(join(config, 'secrets', name), `fixture-${name}`, { mode: 0o600 })
+  const appPort = await freePort()
+  writeFileSync(join(config, 'deployment.env'), `KALA_IDENTITY_MODE=external\nKALA_PROFILE=local\nKALA_STORAGE=local-volume\nCOMPOSE_PROJECT_NAME=runlab-test\nKALA_PUBLIC_URLS=http://localhost:${appPort}\nKALA_PUBLIC_LISTEN=127.0.0.1:${appPort}\nOIDC_ISSUER=https://identity.example.test\nOIDC_DISCOVERY_ORIGIN=https://identity.example.test\n`)
+  const oidcCa = join(config, 'oidc-ca.pem'); writeFileSync(oidcCa, `${rootCertificates[0]}\n`, { mode: 0o600 })
+  const dockerCapture = join(scratch, 'docker-calls.jsonl')
   const bin = join(scratch, 'bin'); mkdirSync(bin); const docker = join(bin, 'docker')
   writeFileSync(docker, `#!/usr/bin/env node
-const args=process.argv.slice(2);
-if(args.includes('ps')&&args.includes('--format')){
+const fs=require('node:fs');const args=process.argv.slice(2);
+fs.appendFileSync(process.env.DOCKER_CAPTURE,JSON.stringify({args,oidcCa:process.env.KALA_OIDC_CA_FILE,dashboard:process.env.KALA_DASHBOARD_IMAGE})+'\\n');
+if(args.includes('exec')){let body='';process.stdin.setEncoding('utf8');process.stdin.on('data',c=>body+=c);process.stdin.on('end',()=>{fs.writeFileSync(process.env.PROVISION_CAPTURE,body);console.log(JSON.stringify({organizationId:'org_fixture',runtimeUnitId:'tenant_fixture',alreadyApplied:false}))})}
+else if(args.includes('ps')&&args.includes('--format')){
  const suffix=(process.env.KALA_DASHBOARD_IMAGE||'').slice(-8);
  for(const row of [
   {Service:'runtime-host',ID:'runtime-fixed',Image:process.env.KALA_RUNTIME_IMAGE,State:'running',Health:'healthy'},
@@ -48,12 +61,28 @@ if(args.includes('ps')&&args.includes('--format')){
 }
 `)
   chmodSync(docker, 0o755)
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator') }
+  const provisionCapture = join(scratch, 'provision-input.json')
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, KALA_PRIVATE_CLOUD_OPERATOR_ROOT: join(scratch, 'operator'), PROVISION_CAPTURE: provisionCapture, DOCKER_CAPTURE: dockerCapture }
   const cli = join(first, 'kala-private-cloud.mjs')
+  assert.match(readFileSync(cli, 'utf8'), /'runtime-ingress', '\/nodejs\/bin\/node', '-e', bootstrap/u)
+  assert.match(readFileSync(cli, 'utf8'), /'stop', 'runtime-ingress', 'runtime-host', 'dashboard', \.\.\.\(bundledIdentity \? \[.*'identity-postgres'.*\] : \[\]\), 'control-postgres'/u)
   const installed = JSON.parse(run(process.execPath, [cli, 'install', '--bundle', first, '--config-dir', config], { env }).stdout)
   assert.equal(installed.receipt.phase, 'completed')
+  const provisioned = run(process.execPath, [cli, 'provision-organization', '--owner-issuer', 'https://identity.example.test', '--owner-subject', 'idp-subject-7f2', '--owner-email', 'owner@example.test', '--organization-name', 'Example Org', '--contract-reference', 'contract-2026-001', '--ends-at', '2099-01-01T00:00:00.000Z', '--operation-id', 'provision-example-001'], { env })
+  assert.equal(JSON.parse(provisioned.stdout).organizationId, 'org_fixture')
+  const provisionInput = JSON.parse(readFileSync(provisionCapture, 'utf8'))
+  assert.equal(provisionInput.PROVISION_OWNER_SUBJECT, 'idp-subject-7f2')
+  assert.equal(provisionInput.PROVISION_OWNER_ISSUER, 'https://identity.example.test')
+  assert.equal(provisioned.stdout.includes('owner@example.test'), false)
+  const wrongIssuer = run(process.execPath, [cli, 'provision-organization', '--owner-issuer', 'https://wrong.example.test', '--owner-subject', 'idp-subject-7f2', '--owner-email', 'owner@example.test', '--organization-name', 'Example Org', '--contract-reference', 'contract-2026-001', '--ends-at', '2099-01-01T00:00:00.000Z', '--operation-id', 'provision-example-002'], { env, allowFailure: true })
+  assert.notEqual(wrongIssuer.status, 0)
+  assert.match(wrongIssuer.stderr, /must exactly match OIDC_ISSUER/u)
   const upgraded = JSON.parse(run(process.execPath, [cli, 'upgrade-dashboard', '--bundle', second], { env }).stdout)
   assert.equal(upgraded.receipt.phase, 'completed')
+  const candidateCalls = readFileSync(dockerCapture, 'utf8').trim().split('\n').map((line) => JSON.parse(line)).filter((call) => call.dashboard === image('dashboard', 'd'))
+  assert.ok(candidateCalls.length > 0)
+  assert.equal(candidateCalls.every((call) => call.oidcCa === oidcCa), true)
+  assert.equal(candidateCalls.every((call) => call.args.some((arg) => arg.endsWith('compose.oidc-private-ca.yaml'))), true)
   assert.equal(upgraded.services['runtime-host'].containerId, 'runtime-fixed')
   assert.equal(upgraded.services['runtime-ingress'].containerId, 'ingress-fixed')
   assert.notEqual(installed.services.dashboard.containerId, upgraded.services.dashboard.containerId)
@@ -65,8 +94,24 @@ if(args.includes('ps')&&args.includes('--format')){
   assert.equal(rolledBack.receipt.phase, 'completed')
   assert.equal(rolledBack.active.images.dashboard, image('dashboard', 'c'))
   assert.equal(rolledBack.predecessor.images.dashboard, image('dashboard', 'd'))
+
+  const composeOnly = join(scratch, 'compose-only')
+  build(composeOnly, { ...shared, dashboard: image('dashboard', 'c') }, '1'.repeat(40))
+  const composePath = join(composeOnly, 'compose.yaml')
+  const changedCompose = `${readFileSync(composePath, 'utf8')}\n# network gateway fix\n`
+  writeFileSync(composePath, changedCompose)
+  const manifestPath = join(composeOnly, 'manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  manifest.files['compose.yaml'] = { bytes: Buffer.byteLength(changedCompose), sha256: createHash('sha256').update(changedCompose).digest('hex') }
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  assert.equal(JSON.parse(run(process.execPath, ['scripts/release/verify-private-cloud-bundle.mjs', composeOnly]).stdout).ok, true)
+  const composeUpgrade = JSON.parse(run(process.execPath, [cli, 'upgrade', '--bundle', composeOnly], { env }).stdout)
+  assert.equal(composeUpgrade.receipt.phase, 'completed')
+  assert.notEqual(composeUpgrade.active.releaseId, rolledBack.active.releaseId)
+  assert.deepEqual(composeUpgrade.active.images, rolledBack.active.images)
 })
 
+function freePort() { return new Promise((resolve, reject) => { const server = createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)) }) }) }
 function build(output, images, revision = '1'.repeat(40)) {
   run(process.execPath, ['scripts/release/build-private-cloud-bundle.mjs', '--output', output, '--runtime-image', images.runtime, '--ingress-image', images.ingress, '--dashboard-image', images.dashboard, '--revision', revision])
 }

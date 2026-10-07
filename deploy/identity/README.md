@@ -22,9 +22,11 @@ Before first start, provision Identity-owned secret files (do not commit them):
 ```bash
 mkdir -p deploy/identity/.secrets
 openssl rand -base64 48 > deploy/identity/.secrets/postgres_password
-openssl rand -hex 16 > deploy/identity/.secrets/zitadel_masterkey
+openssl rand -hex 16 | tr -d '\n' > deploy/identity/.secrets/zitadel_masterkey
 chmod 600 deploy/identity/.secrets/*
 ```
+
+The ZITADEL master key file must be **exactly 32 bytes** (no trailing newline) and readable by the container's non-root UID 1000; when creating files as root, set its owner to UID 1000 without widening the `0600` mode. The PostgreSQL password is URI-encoded when generating the private ZITADEL config, so base64 credentials containing `/` or `+` remain valid. Never rotate the master key in place without following ZITADEL's recovery procedure.
 
 The Compose project owns its ZITADEL database, bootstrap, and configuration volumes under
 canonical Identity names. Do not run `down -v`; back up PostgreSQL before upgrades. Other
