@@ -52,7 +52,7 @@
     "cmdk": "1.1.1",
     "i18next": "26.3.5",
     "idb": "8.0.3",
-    "katex": "0.17.0",
+    "katex": "0.18.2",
     "lucide-react": "1.23.0",
     "mermaid": "11.16.1",
     "microsoft-cognitiveservices-speech-sdk": "1.51.0",
