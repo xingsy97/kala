@@ -117,7 +117,7 @@ jobs:
           for asset in manifest.json SHA256SUMS \
             kala-executor-linux-x64 kala-executor-darwin-x64 \
             kala-executor-darwin-arm64 kala-executor-win32-x64.exe \
-            node-pty-win32-x64.tar.gz install-executor.ps1 \
+            node-pty-win32-x64.tar.gz kala-executor-service-host-win32-x64.exe install-executor.ps1 \
             kala-dashboard-with-runtime.cjs \
             kala-copilot-runtime-win32-x64 \
             kala-copilot-runtime-node-win32-x64.node; do

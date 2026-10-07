@@ -20,6 +20,17 @@ Apply these rules whenever adding or updating packages, actions, build tools, re
 - Treat postinstall, prepare, lifecycle, and downloaded executable code as privileged. Disable scripts when they are unnecessary; otherwise review them explicitly.
 - Review transitive dependency and lockfile diffs. Unexpected package additions, source changes, integrity changes, or registry changes block the update.
 
+## Pinned release binary record
+
+The Windows x64 Executor service wrapper is the upstream WinSW `v2.12.0` asset `WinSW-x64.exe`, redistributed as `kala-executor-service-host-win32-x64.exe` under WinSW's MIT license.
+
+- Source: <https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe>
+- Size: `18,243,033` bytes
+- SHA-256: `05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da`
+- Machine: PE x64 (`0x8664`)
+
+Release builds download only this versioned HTTPS URL and fail closed unless all recorded properties match. Installers obtain the renamed asset through the Host-mediated or signed release manifest path; they never download WinSW directly from GitHub.
+
 ## Change and release controls
 
 - Keep dependency updates separate from unrelated behavior changes so their provenance and impact can be reviewed independently.

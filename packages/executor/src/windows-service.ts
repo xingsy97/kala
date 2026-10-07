@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, lstatSync, mkdirSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, win32 } from 'node:path'
 
 export type WindowsServiceAction = 'create' | 'start' | 'query' | 'stop' | 'delete' | 'recovery'
@@ -8,6 +9,8 @@ export interface WindowsServiceLayout {
   installDir: string
   dataDir: string
   executablePath: string
+  serviceHostPath: string
+  serviceConfigPath: string
   configPath: string
 }
 
@@ -60,6 +63,43 @@ export interface ManagedWindowsInstallation {
 
 const DEFAULT_VENDOR = 'Kala'
 const DEFAULT_PRODUCT = 'Executor'
+export const WINDOWS_SERVICE_HOST_ASSET = 'kala-executor-service-host-win32-x64.exe'
+const WINDOWS_SERVICE_HOST_SHA256 = '05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da'
+const WINDOWS_SERVICE_HOST_BYTES = 18_243_033
+
+/** Re-verify the pinned release asset at the privileged installation boundary. */
+export function copyWindowsServiceHost(sourceRoot: string, destinationRoot: string): void {
+  const source = join(sourceRoot, WINDOWS_SERVICE_HOST_ASSET)
+  if (!existsSync(source) || !lstatSync(source).isFile() || lstatSync(source).size !== WINDOWS_SERVICE_HOST_BYTES) {
+    throw new Error('Windows service host is missing or has the wrong size')
+  }
+  const bytes = readFileSync(source)
+  if (createHash('sha256').update(bytes).digest('hex') !== WINDOWS_SERVICE_HOST_SHA256) {
+    throw new Error('Windows service host SHA-256 mismatch')
+  }
+  copyFileSync(source, join(destinationRoot, 'kala-executor-service.exe'))
+}
+
+function xml(value: string): string {
+  return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/'/gu, '&apos;')
+}
+
+export function renderWindowsServiceConfig(layout: WindowsServiceLayout, serviceName: string, displayName: string): string {
+  return `<service>\n  <id>${xml(safeValue(serviceName, 'name'))}</id>\n  <name>${xml(safeValue(displayName, 'display name'))}</name>\n  <description>Kala native Executor</description>\n  <executable>%BASE%\\${xml(win32.basename(layout.executablePath))}</executable>\n  <arguments>--config ${xml(quoteWindowsArgument(layout.configPath))}</arguments>\n  <log mode="roll-by-size">\n    <sizeThreshold>10240</sizeThreshold>\n    <keepFiles>5</keepFiles>\n  </log>\n  <stoptimeout>15sec</stoptimeout>\n  <stopparentprocessfirst>true</stopparentprocessfirst>\n</service>\n`
+}
+
+export async function secureWindowsServiceDataDir(
+  dataDir: string,
+  options: WindowsServiceExecutorOptions = {},
+): Promise<void> {
+  if ((options.platform ?? process.platform) !== 'win32') throw new Error('Windows ACL hardening is unavailable on this platform')
+  // SID form is locale-independent: LocalSystem and built-in Administrators.
+  // Apply before writing any credential; strip inherited Users access.
+  const result = await (options.runner ?? spawnWindowsCommand)('icacls.exe', [
+    dataDir, '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F',
+  ])
+  if (result.exitCode !== 0) throw new Error(`Unable to secure Windows Executor credentials directory: ${result.stderr.trim() || result.stdout.trim()}`)
+}
 
 export const WINDOWS_NODE_PTY_RUNTIME_FILES = Object.freeze([
   'prebuilds/win32-x64/conpty.node',
@@ -112,6 +152,8 @@ export function windowsServiceLayout(options: WindowsServicePlanOptions): Window
     installDir,
     dataDir,
     executablePath: win32.join(installDir, executableName),
+    serviceHostPath: win32.join(installDir, 'kala-executor-service.exe'),
+    serviceConfigPath: win32.join(installDir, 'kala-executor-service.xml'),
     configPath: win32.join(dataDir, 'config.json'),
   }
 }
@@ -131,9 +173,8 @@ export function createWindowsServicePlan(options: WindowsServicePlanOptions): Wi
   const serviceName = safeValue(options.serviceName, 'name')
   const displayName = safeValue(options.displayName ?? serviceName, 'display name')
   const layout = windowsServiceLayout(options)
-  const binaryPath = [layout.executablePath, '--config', layout.configPath]
-    .map(quoteWindowsArgument)
-    .join(' ')
+  // The Node SEA is a console program and cannot report SERVICE_RUNNING to SCM.
+  const binaryPath = quoteWindowsArgument(layout.serviceHostPath)
   const resetSeconds = options.recovery?.resetSeconds ?? 86_400
   const restartDelaysMs = options.recovery?.restartDelaysMs ?? [5_000, 30_000]
   if (!Number.isSafeInteger(resetSeconds) || resetSeconds < 0) throw new Error('Invalid recovery reset seconds')
@@ -184,6 +225,30 @@ export async function executeWindowsServicePlan(
     results.push(await executeWindowsServiceCommand(command, options))
   }
   return results
+}
+
+export async function waitForWindowsServiceStopped(
+  plan: WindowsServicePlan,
+  options: WindowsServiceExecutorOptions & { timeoutMs?: number; pollMs?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000)
+  const query = plan.commands.find((command) => command.action === 'query')
+  if (!query) throw new Error('Windows service plan does not contain query')
+  while (true) {
+    try {
+      const result = await executeWindowsServiceCommand(query, options)
+      const match = result.stdout.match(/\bSTATE\s*:\s*(\d+)\b/iu)
+      if (!match) throw new Error('Windows SCM query returned an unrecognized state')
+      if (Number(match[1]) === 1) return // STOPPED; pending stop is state 3.
+    } catch (error) {
+      // 1060 means the service was not registered (e.g. install failed before
+      // sc create). Do not interpret any other SCM error as a stopped process.
+      if (!(error instanceof Error) || !/SCM query failed \(1060\)|\[SC\] OpenService FAILED 1060/u.test(error.message)) throw error
+      return
+    }
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for Windows Executor service to stop')
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 250))
+  }
 }
 
 export const spawnWindowsCommand: WindowsCommandRunner = (command, args, options = {}) =>

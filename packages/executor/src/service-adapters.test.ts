@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
 import { createMacosLaunchdService, executeLaunchdPlan } from './macos-launchd.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, createWindowsServicePlan, executeWindowsServicePlan, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
+import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsServicePlan, executeWindowsServicePlan, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
 import type { InstallerSession } from './installer-session.js'
 
 const session: InstallerSession = {
@@ -156,8 +156,11 @@ describe('Windows service adapter', () => {
     const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor', programFiles: 'C:\\Program Files', programData: 'C:\\Program Data', executableName: 'kala-executor.exe' })
     const create = plan.commands.find((command) => command.action === 'create')!
     expect(create.args.join(' ')).toContain('C:\\Program Files')
-    expect(create.args.join(' ')).toContain('--config')
-    expect(create.args.join(' ')).not.toMatch(/token|credential/i)
+    expect(create.args[3]).toBe('"C:\\Program Files\\Kala\\Executor\\kala-executor-service.exe"')
+    expect(create.args.join(' ')).not.toMatch(/token|credential|--config/i)
+    expect(plan.layout.serviceConfigPath).toBe('C:\\Program Files\\Kala\\Executor\\kala-executor-service.xml')
+    expect(renderWindowsServiceConfig(plan.layout, 'KalaExecutor', 'Kala Executor')).toContain('<executable>%BASE%\\kala-executor.exe</executable>')
+    expect(renderWindowsServiceConfig(plan.layout, 'KalaExecutor', 'Kala Executor')).toContain('--config &quot;C:\\Program Data\\Kala\\Executor\\config.json&quot;')
     const runner = vi.fn(async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }))
     await executeWindowsServicePlan(plan, ['create', 'recovery', 'start'], { platform: 'win32', runner })
     expect(runner).toHaveBeenCalledTimes(3)
@@ -184,6 +187,52 @@ describe('Windows service adapter', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  it('escapes service XML and rejects an untrusted binary before copying it', () => {
+    const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor', programData: 'C:\\Company & Friends\\Data' })
+    const definition = renderWindowsServiceConfig(plan.layout, 'Kala <Executor>', 'R&D "Service"')
+    expect(definition).toContain('Kala &lt;Executor&gt;')
+    expect(definition).toContain('R&amp;D &quot;Service&quot;')
+    expect(definition).toContain('C:\\Company &amp; Friends\\Data')
+    expect(definition).not.toContain('token')
+    const root = mkdtempSync(join(tmpdir(), 'runlab-windows-host-copy-'))
+    try {
+      expect(() => copyWindowsServiceHost(root, root)).toThrow(/missing or has the wrong size/)
+      writeFileSync(join(root, 'kala-executor-service-host-win32-x64.exe'), 'untrusted')
+      expect(() => copyWindowsServiceHost(root, root)).toThrow(/missing or has the wrong size/)
+      expect(existsSync(join(root, 'kala-executor-service.exe'))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('restricts Windows service credentials to LocalSystem and Administrators before use', async () => {
+    const runner = vi.fn(async () => ({ exitCode: 0, stdout: 'Successfully processed 1 files', stderr: '' }))
+    await secureWindowsServiceDataDir('C:\\ProgramData\\Kala\\Executor', { platform: 'win32', runner })
+    expect(runner).toHaveBeenCalledWith('icacls.exe', [
+      'C:\\ProgramData\\Kala\\Executor', '/inheritance:r', '/grant:r', '*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F',
+    ])
+    await expect(secureWindowsServiceDataDir('C:\\ProgramData\\Kala\\Executor', {
+      platform: 'win32', runner: async () => ({ exitCode: 5, stdout: '', stderr: 'Access denied' }),
+    })).rejects.toThrow('Unable to secure Windows Executor credentials directory')
+  })
+
+  it('waits for STOPPED, tolerates only missing services, and rejects unknown SCM status', async () => {
+    const plan = createWindowsServicePlan({ serviceName: 'KalaExecutor' })
+    const states = ['STATE : 3 STOP_PENDING', 'STATE : 1 STOPPED']
+    const runner = vi.fn(async () => ({ exitCode: 0, stdout: states.shift() ?? 'STATE : 1 STOPPED', stderr: '' }))
+    await waitForWindowsServiceStopped(plan, { platform: 'win32', runner, pollMs: 1 })
+    expect(runner).toHaveBeenCalledTimes(2)
+    await expect(waitForWindowsServiceStopped(plan, {
+      platform: 'win32', runner: async () => ({ exitCode: 1060, stdout: '[SC] OpenService FAILED 1060:', stderr: '' }),
+    })).resolves.toBeUndefined()
+    await expect(waitForWindowsServiceStopped(plan, {
+      platform: 'win32', runner: async () => ({ exitCode: 5, stdout: 'Access denied', stderr: '' }),
+    })).rejects.toThrow('SCM query failed')
+    await expect(waitForWindowsServiceStopped(plan, {
+      platform: 'win32', runner: async () => ({ exitCode: 0, stdout: 'unknown', stderr: '' }),
+    })).rejects.toThrow('unrecognized state')
   })
 
   it('binds uninstall to a recognized installation identity', () => {

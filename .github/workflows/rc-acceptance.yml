@@ -108,6 +108,7 @@ jobs:
             'kala-dashboard-with-runtime.cjs',
             'kala-executor-win32-x64.exe',
             'node-pty-win32-x64.tar.gz',
+            'kala-executor-service-host-win32-x64.exe',
             'install-executor.ps1',
             'kala-copilot-runtime-win32-x64',
             'kala-copilot-runtime-node-win32-x64.node'
@@ -132,6 +133,8 @@ jobs:
           }
           node --input-type=module -e "import { verifyWindowsNodePtyCompanion } from './scripts/release/windows-executor-packager.mjs'; verifyWindowsNodePtyCompanion('acceptance/candidate/node-pty-win32-x64.tar.gz')"
           if ($LASTEXITCODE -ne 0) { throw 'Accepted ConPTY companion inventory or digest is invalid' }
+          node --input-type=module -e "import { verifyWindowsServiceHost } from './scripts/release/windows-service-host.mjs'; verifyWindowsServiceHost('acceptance/candidate/kala-executor-service-host-win32-x64.exe')"
+          if ($LASTEXITCODE -ne 0) { throw 'Accepted Windows service host identity or digest is invalid' }
           tar -xzf acceptance/candidate/node-pty-win32-x64.tar.gz -C acceptance/candidate
           if ($LASTEXITCODE -ne 0) { throw 'Failed to extract the accepted ConPTY companion' }
           New-Item -ItemType Directory -Force acceptance/candidate/prebuilds | Out-Null

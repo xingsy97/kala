@@ -132,6 +132,7 @@ function verifyWindowsPortableAndConpty() {
     'kala-dashboard-with-runtime.cjs',
     'kala-executor-win32-x64.exe',
     'node-pty-win32-x64.tar.gz',
+    'kala-executor-service-host-win32-x64.exe',
     'install-executor.ps1',
     'kala-copilot-runtime-win32-x64',
     'kala-copilot-runtime-node-win32-x64.node',

@@ -243,6 +243,7 @@ jobs:
           if ((git rev-parse HEAD).Trim() -ne $env:CAPTURE_REVISION) { throw 'Windows release checkout differs from the tag revision' }
           Copy-Item release/kala-executor-win32-x64.exe $capture/
           Copy-Item release/node-pty-win32-x64.tar.gz $capture/
+          Copy-Item release/kala-executor-service-host-win32-x64.exe $capture/
           Set-Location $capture
           node -e "const fs=require('fs'),c=require('crypto');const names=fs.readdirSync('.').sort();const assets=Object.fromEntries(names.map(n=>[n,c.createHash('sha256').update(fs.readFileSync(n)).digest('hex')]));fs.writeFileSync('windows-capture-manifest.json',JSON.stringify({schemaVersion:1,revision:process.env.CAPTURE_REVISION,assets},null,2)+String.fromCharCode(10))"
       - uses: actions/upload-artifact@v5
@@ -299,7 +300,7 @@ jobs:
           import { join } from 'node:path'
           const root = process.env.WINDOWS_CAPTURE_DIR
           const manifest = JSON.parse(readFileSync(join(root, 'windows-capture-manifest.json'), 'utf8'))
-          const expected = ['kala-copilot-runtime-node-win32-x64.node', 'kala-copilot-runtime-win32-x64', 'kala-dashboard-with-runtime.cjs', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz']
+          const expected = ['kala-copilot-runtime-node-win32-x64.node', 'kala-copilot-runtime-win32-x64', 'kala-dashboard-with-runtime.cjs', 'kala-executor-service-host-win32-x64.exe', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz']
           if (manifest.schemaVersion !== 1 || manifest.revision !== process.env.EXPECTED_REVISION) throw new Error('Windows capture revision mismatch')
           if (JSON.stringify(Object.keys(manifest.assets).sort()) !== JSON.stringify(expected)) throw new Error('Windows capture manifest inventory is not exact')
           if (JSON.stringify(readdirSync(root).sort()) !== JSON.stringify([...expected, 'windows-capture-manifest.json'].sort())) throw new Error('Windows capture artifact inventory is not closed')
@@ -322,6 +323,7 @@ jobs:
           test -f release/kala-executor-darwin-arm64
           test -f release/kala-executor-win32-x64.exe
           test -f release/node-pty-win32-x64.tar.gz
+          test -f release/kala-executor-service-host-win32-x64.exe
           test -f release/install-executor.ps1
           test -f release/kala-copilot-runtime-win32-x64
           test -f release/kala-copilot-runtime-node-win32-x64.node

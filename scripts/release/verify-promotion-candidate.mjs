@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { collectRcEvidence, requiredReleaseEvidence, verifyRcEvidenceSet } from './rc-evidence.mjs'
 import { verifyReleaseChecksums } from './release-checksums.mjs'
+import { windowsServiceHostManifestMetadata } from './windows-service-host.mjs'
 
 const directory = resolve(required('--directory'))
 const evidenceDirectory = resolve(required('--evidence'))
@@ -13,7 +14,7 @@ const revision = required('--revision')
 const manifest = json(join(directory, 'manifest.json'))
 const targets = [...requiredReleaseEvidence.portable.targets]
 const nativeExecutorAssets = targets.map((target) => target === 'win32-x64' ? 'kala-executor-win32-x64.exe' : `kala-executor-${target}`)
-const windowsAssets = ['node-pty-win32-x64.tar.gz', 'install-executor.ps1']
+const windowsAssets = ['node-pty-win32-x64.tar.gz', 'kala-executor-service-host-win32-x64.exe', 'install-executor.ps1']
 const expectedAssets = [
   ...nativeExecutorAssets,
   ...windowsAssets,
@@ -26,6 +27,9 @@ const expectedAssets = [
 if (manifest.version !== tag.slice(1)) fail('current release manifest version does not match the promoted tag')
 if (manifest.source?.revision !== revision) fail('current release manifest revision does not match the promoted revision')
 if (!Array.isArray(manifest.assets) || manifest.assets.length === 0) fail('current release manifest has no assets')
+if (JSON.stringify(manifest.windowsServiceHost) !== JSON.stringify(windowsServiceHostManifestMetadata())) {
+  fail('current release manifest does not identify the pinned Windows service host')
+}
 assertUnique(manifest.assets, 'current release manifest assets')
 if (JSON.stringify([...manifest.assets].sort()) !== JSON.stringify(expectedAssets)) fail('current release manifest does not contain the exact checksummed assets')
 if (!Array.isArray(manifest.nativeTargets) || JSON.stringify([...manifest.nativeTargets].sort()) !== JSON.stringify([...targets].sort())) {

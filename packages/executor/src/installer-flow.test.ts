@@ -68,6 +68,15 @@ describe('installer flow', () => {
     }), { mode: 0o600 })
     expect(readExecutorRuntimeConfig(configPath).privilegeMode).toBe('privileged')
     writeFileSync(configPath, JSON.stringify({
+      version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential',
+      installationSource: 'dashboard-native', workspaceId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    }), { mode: 0o600 })
+    expect(readExecutorRuntimeConfig(configPath).workspaceId).toBe('01ARZ3NDEKTSV4RRFFQ69G5FAV')
+    writeFileSync(configPath, JSON.stringify({
+      version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential', workspaceId: '../different-user',
+    }), { mode: 0o600 })
+    expect(() => readExecutorRuntimeConfig(configPath)).toThrow('Invalid Executor config')
+    writeFileSync(configPath, JSON.stringify({
       version: 1, host: 'https://host', sandboxRoots: ['/repo'], credentialFile: '/credential', privilegeMode: 'root',
     }))
     expect(() => readExecutorRuntimeConfig(configPath)).toThrow('Invalid Executor privilege mode')

@@ -143,7 +143,7 @@ test('release requires three POSIX and one Windows hosted Portable acceptances p
   assert.match(promotion, /--jq '\.workflow_runs\[\]\.head_sha' \| awk/u)
   assert.doesNotMatch(promotion, /select\(\.head_sha/u)
   assert.doesNotMatch(promotion, /Windows release asset is not allowed/u)
-  assert.match(promotion, /kala-executor-win32-x64\.exe[\s\S]*node-pty-win32-x64\.tar\.gz install-executor\.ps1/u)
+  assert.match(promotion, /kala-executor-win32-x64\.exe[\s\S]*node-pty-win32-x64\.tar\.gz kala-executor-service-host-win32-x64\.exe install-executor\.ps1/u)
   assert.match(promotion, /gh release download "\$TAG" --dir "\$CANDIDATE"/u)
   assert.match(promotion, /verify-promotion-candidate\.mjs/u)
   assert.match(promotion, /kala-dashboard-with-runtime\.cjs/u)

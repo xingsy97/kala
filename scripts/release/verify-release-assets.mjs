@@ -7,6 +7,7 @@ import { verifyReleaseChecksums } from './release-checksums.mjs'
 import { inspectDedicatedSupportBundle, DEDICATED_SUPPORT_ARCHIVE } from './dedicated-support-bundle.mjs'
 import { dashboardArchiveName, releaseMetadataArchiveName, verifyDashboardArchive, verifyReleaseMetadataArchive } from './release-archives.mjs'
 import { verifyWindowsNodePtyCompanion } from './windows-executor-packager.mjs'
+import { verifyWindowsServiceHost, WINDOWS_SERVICE_HOST, windowsServiceHostManifestMetadata } from './windows-service-host.mjs'
 
 const root = fileURLToPath(new URL('../..', import.meta.url))
 const releaseDir = join(root, 'release')
@@ -43,6 +44,10 @@ for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   }
 }
 const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const expectedWindowsServiceHost = targetsForInventory.includes('win32-x64') ? windowsServiceHostManifestMetadata() : undefined
+if (JSON.stringify(manifest.windowsServiceHost) !== JSON.stringify(expectedWindowsServiceHost)) {
+  fail('manifest.windowsServiceHost must identify the pinned WinSW source, license, size, and SHA-256')
+}
 const expectedNativeAssets = {
   'kala-host': [],
   'kala-runtime': [],
@@ -70,7 +75,7 @@ const copilotRuntimeAssets = actualCopilotRuntimeTargets.flatMap((target) => [
 const expectedManifestAssets = [
   ...expectedNativeAssets['kala-executor'],
   ...copilotRuntimeAssets,
-  ...(targetsForInventory.includes('win32-x64') ? ['node-pty-win32-x64.tar.gz', 'install-executor.ps1'] : []),
+  ...(targetsForInventory.includes('win32-x64') ? ['node-pty-win32-x64.tar.gz', WINDOWS_SERVICE_HOST.asset, 'install-executor.ps1'] : []),
   'kala-dashboard-with-runtime.cjs',
   'kala-runtime.cjs',
   'kala-executor.cjs',
@@ -96,6 +101,16 @@ const copilotDependency = sbom.components.find((component) => component.name ===
 const copilotRuntimeDependency = sbom.components.find((component) => component.name === `@github/copilot-sdk-${process.platform}-${process.arch}`)
 if (!copilotDependency || !copilotRuntimeDependency || !notices.includes('@github/copilot-sdk@')) {
   fail('release metadata must retain the upstream Copilot SDK and platform runtime dependencies')
+}
+if (targetsForInventory.includes('win32-x64')) {
+  const serviceHostDependency = sbom.components.find((component) => component.name === WINDOWS_SERVICE_HOST.product && component.version === WINDOWS_SERVICE_HOST.version)
+  if (!serviceHostDependency
+    || serviceHostDependency.licenses?.[0]?.license?.id !== WINDOWS_SERVICE_HOST.license
+    || serviceHostDependency.hashes?.[0]?.content !== WINDOWS_SERVICE_HOST.sha256
+    || !notices.includes(`${WINDOWS_SERVICE_HOST.product}@${WINDOWS_SERVICE_HOST.version} — ${WINDOWS_SERVICE_HOST.license}`)
+    || !notices.includes(readFileSync(join(root, 'scripts/release/licenses/WinSW-MIT.txt'), 'utf8').trimEnd())) {
+    fail('release metadata must retain the pinned WinSW source, digest, and complete MIT license')
+  }
 }
 const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
 if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
@@ -305,6 +320,13 @@ if (manifest.assets.includes('node-pty-win32-x64.tar.gz')) {
     fail(`Windows node-pty companion verification failed: ${error.message}`)
   }
 }
+if (manifest.assets.includes(WINDOWS_SERVICE_HOST.asset)) {
+  try {
+    verifyWindowsServiceHost(join(releaseDir, WINDOWS_SERVICE_HOST.asset))
+  } catch (error) {
+    fail(`Windows service host verification failed: ${error.message}`)
+  }
+}
 
 if (manifest.assets.includes('kala-executor.cjs')) {
   const executorHelp = spawnSync('node', ['kala-executor.cjs', '--help'], {
@@ -385,6 +407,7 @@ console.log('release assets verified')
 function isNativeAsset(asset) {
   return /^kala-(?:host|executor|dedicated-ingress|dedicated-deploy-supervisor)-(?:linux|darwin)-(?:x64|arm64)$/.test(asset)
     || asset === 'kala-executor-win32-x64.exe'
+    || asset === WINDOWS_SERVICE_HOST.asset
 }
 
 function nativeExecutorAssetName(target) {
@@ -401,6 +424,7 @@ function assertSupportedReleaseAssetName(name, location) {
   const acceptedWindows = new Set([
     'kala-executor-win32-x64.exe',
     'node-pty-win32-x64.tar.gz',
+    WINDOWS_SERVICE_HOST.asset,
     'install-executor.ps1',
     'kala-copilot-runtime-win32-x64',
     'kala-copilot-runtime-node-win32-x64.node',
