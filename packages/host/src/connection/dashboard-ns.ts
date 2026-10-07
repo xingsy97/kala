@@ -1652,6 +1652,7 @@ export function configureDashboardNamespace(
         const run = deps.dagStore.createRun(p.sessionId, p.objective, `${p.operationId}:run`)
         const updated = deps.dagStore.installGraph(run.id, p.graph, `${p.operationId}:graph`)
         deps.dashboardNs.to(sessionRoom(p.sessionId)).emit('server:dag_run', { sessionId: p.sessionId, run: updated })
+        deps.loopDeps.dagScheduler?.schedule(p.sessionId)
         ack({ ok: true, value: updated })
       } catch (error) {
         ack({ ok: false, error: error instanceof Error ? error.message : String(error) })

@@ -321,6 +321,40 @@ describe('wire protocol', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('schedules newly initialized DAG runs before any host restart', async () => {
+    const sessionId = 'dag-initial-schedule'
+    const dashboard: ClientSocket<DashboardServerToClientEvents, DashboardClientToServerEvents> = clientIO(`${url}/dashboard`, {
+      transports: ['websocket'],
+      auth: { sessionId, role: 'dashboard', clientVersion: PROTOCOL_VERSION },
+      reconnection: false,
+    })
+    try {
+      await new Promise<SessionReadyEvent>((resolveReady, reject) => {
+        dashboard.once('session:ready', resolveReady)
+        dashboard.once('connect_error', reject)
+      })
+      const created = await dashboard.timeout(2000).emitWithAck('client:create_session', {
+        sessionId, operationId: 'dag-initial-create', executionMode: 'dag',
+      })
+      expect(created.ok).toBe(true)
+      const initialized = await dashboard.timeout(2000).emitWithAck('client:initialize_dag', {
+        sessionId, operationId: 'dag-initial-graph', objective: 'Verify initial graph scheduling',
+        graph: { expectedGraphVersion: 0, resultNodeId: 'one', nodes: [{ id: 'one', title: 'One', instructions: 'Execute' }], edges: [] },
+      })
+      expect(initialized.ok).toBe(true)
+      const deadline = Date.now() + 3000
+      let leaseObserved = false
+      while (Date.now() < deadline && !leaseObserved) {
+        const result = await dashboard.timeout(1000).emitWithAck('client:get_dag_run', { sessionId })
+        leaseObserved = result.ok && result.value?.events.some((event) => event.type === 'lease') === true
+        if (!leaseObserved) await new Promise((resolveWait) => setTimeout(resolveWait, 25))
+      }
+      expect(leaseObserved).toBe(true)
+    } finally {
+      dashboard.close()
+    }
+  })
+
   it('advertises an 8 MiB Socket.IO payload limit for bounded inline images', async () => {
     const body = await fetch(`${url}/socket.io/?EIO=4&transport=polling`).then((response) => response.text())
     const handshake = JSON.parse(body.slice(1)) as { maxPayload: number }
