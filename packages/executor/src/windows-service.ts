@@ -218,6 +218,20 @@ export function renderWindowsServiceConfig(layout: WindowsServiceLayout, service
   return `<service>\n  <id>${xml(safeValue(serviceName, 'name'))}</id>\n  <name>${xml(safeValue(displayName, 'display name'))}</name>\n  <description>Kala native Executor</description>\n  <executable>%BASE%\\${xml(win32.basename(layout.executablePath))}</executable>\n  <arguments>--config ${xml(quoteWindowsArgument(layout.configPath))}</arguments>\n  <log mode="roll-by-size">\n    <sizeThreshold>10240</sizeThreshold>\n    <keepFiles>5</keepFiles>\n  </log>\n  <stoptimeout>15sec</stoptimeout>\n  <stopparentprocessfirst>true</stopparentprocessfirst>\n</service>\n`
 }
 
+export async function assertElevatedWindowsAdministrator(
+  options: WindowsServiceExecutorOptions & { systemRoot?: string } = {},
+): Promise<void> {
+  if ((options.platform ?? process.platform) !== 'win32') throw new Error('Windows service installation requires an elevated Administrator process')
+  const systemRoot = options.systemRoot ?? process.env.SystemRoot
+  if (!systemRoot || !win32.isAbsolute(systemRoot)) throw new Error('Windows service installation requires an elevated Administrator process')
+  // Use the same effective Administrator membership check as invite.ps1.
+  // A high-integrity SID alone is not portable across supported Windows runner policies.
+  const powershell = win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const script = '$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }'
+  const result = await (options.runner ?? spawnWindowsCommand)(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script]).catch(() => undefined)
+  if (result?.exitCode !== 0) throw new Error('Windows service installation requires an elevated Administrator process')
+}
+
 export async function secureWindowsServiceDataDir(
   dataDir: string,
   options: WindowsServiceExecutorOptions = {},

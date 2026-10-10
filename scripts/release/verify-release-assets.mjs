@@ -19,6 +19,10 @@ if (!existsSync(manifestPath)) fail('missing release/manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const supportedNativeTargets = ['linux-x64', 'darwin-x64', 'darwin-arm64', 'win32-x64']
 const supportedCopilotRuntimeTargets = supportedNativeTargets
+const privateCloudRuntime = process.argv.includes('--private-cloud-runtime')
+if (privateCloudRuntime && (manifest.component !== 'all' || process.argv.includes('--require-signed') || process.platform !== 'linux' || process.arch !== 'x64')) {
+  fail('Private Cloud runtime verification requires an unsigned Linux x64 all-component image stage')
+}
 if (!/^[0-9a-f]{40}$/u.test(manifest.source?.revision ?? '')
   || !/^[0-9a-f]{64}$/u.test(manifest.source?.snapshotSha256 ?? '')
   || typeof manifest.source?.dirty !== 'boolean') {
@@ -33,9 +37,12 @@ if (new Set(manifest.assets).size !== manifest.assets.length) {
 for (const asset of manifest.assets) assertSupportedReleaseAssetName(asset, 'manifest')
 const actualNativeTargets = Array.isArray(manifest.nativeTargets) ? [...manifest.nativeTargets].sort() : undefined
 if (!actualNativeTargets
-  || (actualNativeTargets.length !== 0
-    && JSON.stringify(actualNativeTargets) !== JSON.stringify([...supportedNativeTargets].sort()))) {
-  fail('manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the four supported Executor targets')
+  || (privateCloudRuntime
+    ? JSON.stringify(actualNativeTargets) !== JSON.stringify(['win32-x64'])
+    : actualNativeTargets.length !== 0 && JSON.stringify(actualNativeTargets) !== JSON.stringify([...supportedNativeTargets].sort()))) {
+  fail(privateCloudRuntime
+    ? 'Private Cloud runtime manifest.nativeTargets must contain exactly Windows x64'
+    : 'manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the four supported Executor targets')
 }
 for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
   if (!Array.isArray(assets)) fail(`manifest.nativeAssets.${product} must be an array`)
@@ -44,7 +51,7 @@ for (const [product, assets] of Object.entries(manifest.nativeAssets ?? {})) {
     if (!supportedNativeTargets.some((target) => asset === nativeExecutorAssetName(target))) fail(`unsupported native asset target in ${asset}`)
   }
 }
-const targetsForInventory = actualNativeTargets.length === 0 ? [] : supportedNativeTargets
+const targetsForInventory = actualNativeTargets.length === 0 ? [] : privateCloudRuntime ? ['win32-x64'] : supportedNativeTargets
 const expectedWindowsServiceHost = targetsForInventory.includes('win32-x64') ? windowsServiceHostManifestMetadata() : undefined
 if (JSON.stringify(manifest.windowsServiceHost) !== JSON.stringify(expectedWindowsServiceHost)) {
   fail('manifest.windowsServiceHost must identify the pinned WinSW source, license, size, and SHA-256')
@@ -62,7 +69,7 @@ if (JSON.stringify(manifest.nativeAssets) !== JSON.stringify(expectedNativeAsset
 const actualCopilotRuntimeTargets = Array.isArray(manifest.copilotRuntimeTargets)
   ? [...manifest.copilotRuntimeTargets].sort()
   : undefined
-const expectedCopilotRuntimeTargets = actualNativeTargets.length === 0
+const expectedCopilotRuntimeTargets = privateCloudRuntime || actualNativeTargets.length === 0
   ? [`${process.platform}-${process.arch}`]
   : supportedCopilotRuntimeTargets
 if (!actualCopilotRuntimeTargets
@@ -114,6 +121,7 @@ if (targetsForInventory.includes('win32-x64')) {
   }
 }
 const signaturePresent = existsSync(join(releaseDir, 'SHA256SUMS.sigstore.json'))
+if (privateCloudRuntime && signaturePresent) fail('Private Cloud runtime image stage must not contain a signature bundle')
 if (process.argv.includes('--require-signed') && (!signaturePresent || actualNativeTargets.length !== supportedNativeTargets.length)) {
   fail('signed final release requires the signature bundle and all four native Executor targets')
 }

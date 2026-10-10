@@ -122,24 +122,52 @@ $work = if ($env:KALA_INSTALLER_WORK_DIR) { $env:KALA_INSTALLER_WORK_DIR } else 
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 function Download-ReleaseAsset([string]$name) {
   $destination = Join-Path $work $name
-  $response = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$name" -OutFile $destination -PassThru
-  $finalUri = if ($response.BaseResponse.ResponseUri) { $response.BaseResponse.ResponseUri } elseif ($response.BaseResponse.RequestMessage) { $response.BaseResponse.RequestMessage.RequestUri } else { [Uri]"$baseUrl/$name" }
-  if ($publicRelease -and $finalUri.Scheme -ne 'https') { throw "Release asset $name redirected away from HTTPS" }
-  if ($hostRelease -and $finalUri.AbsoluteUri -cne "$baseUrl/$name") { throw "Release asset $name redirected away from the trusted Host" }
+  Write-Host "Fetching verified asset $name..."
+  if ($hostRelease) {
+    # PowerShell 5.1's Invoke-WebRequest can buffer large native payloads even
+    # with -OutFile. Stream the exact Host URL directly, never following redirects.
+    $url = "$baseUrl/$name"
+    $request = [Net.HttpWebRequest]::Create($url)
+    $request.AllowAutoRedirect = $false
+    $request.Timeout = 60000
+    $request.ReadWriteTimeout = 60000
+    $response = $null
+    try {
+      $response = [Net.HttpWebResponse]$request.GetResponse()
+      if ($response.StatusCode -ne [Net.HttpStatusCode]::OK -or $response.ResponseUri.AbsoluteUri -cne $url) { throw "Release asset $name redirected away from the trusted Host" }
+      $inputStream = $response.GetResponseStream()
+      $outputStream = [IO.File]::Create($destination)
+      try { $inputStream.CopyTo($outputStream) }
+      finally { $outputStream.Dispose(); $inputStream.Dispose() }
+      if ($response.ContentLength -ge 0 -and (Get-Item $destination).Length -ne $response.ContentLength) { throw "Release asset $name was truncated" }
+    } finally { if ($response) { $response.Close() } }
+  } else {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$name" -OutFile $destination -PassThru
+    $finalUri = if ($response.BaseResponse.ResponseUri) { $response.BaseResponse.ResponseUri } elseif ($response.BaseResponse.RequestMessage) { $response.BaseResponse.RequestMessage.RequestUri } else { [Uri]"$baseUrl/$name" }
+    if ($publicRelease -and $finalUri.Scheme -ne 'https') { throw "Release asset $name redirected away from HTTPS" }
+  }
+  Write-Host "Asset download completed $name"
   return $destination
 }
 function Read-ExpectedDigest([string]$name, [string[]]$sums) {
   $escaped = [regex]::Escape($name)
   $pattern = "^([0-9a-fA-F]{64})  " + $escaped + '$'
-  $matches = @($sums | Where-Object { $_ -match $pattern })
-  if ($matches.Count -ne 1) { throw "SHA256SUMS must contain exactly one valid entry for $name" }
-  return ($matches[0] -split '\\s+')[0].ToLowerInvariant()
+  $entries = @($sums | ForEach-Object {
+    $entry = [regex]::Match($_, $pattern)
+    if ($entry.Success) { $entry.Groups[1].Value }
+  })
+  if ($entries.Count -ne 1) { throw "SHA256SUMS must contain exactly one valid entry for $name" }
+  return ([string]$entries[0]).ToLowerInvariant()
 }
 function Assert-Digest([string]$path, [string]$expected, [string]$name) {
-  $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+  $stream = [IO.File]::OpenRead($path)
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $actual = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
+  finally { $stream.Dispose(); $sha.Dispose() }
   if ($actual -ne $expected) { throw "Checksum mismatch for $name" }
 }
 try {
+  Write-Host 'Downloading verified Windows Executor assets...'
   $sumsPath = Download-ReleaseAsset 'SHA256SUMS'
   if ((Get-Item $sumsPath).Length -gt $maxMetadataBytes) { throw 'SHA256SUMS exceeds metadata size limit' }
   if ($publicRelease) {
@@ -154,25 +182,40 @@ try {
   $binary = Download-ReleaseAsset $asset
   $archive = Download-ReleaseAsset $companion
   $serviceHostBinary = Download-ReleaseAsset $serviceHost
+  Write-Host 'Verifying Windows Executor checksum...'
   Assert-Digest $binary (Read-ExpectedDigest $asset $sums) $asset
+  Write-Host 'Verifying Windows ConPTY archive checksum...'
   Assert-Digest $archive (Read-ExpectedDigest $companion $sums) $companion
+  Write-Host 'Verifying Windows service-host checksum...'
   Assert-Digest $serviceHostBinary (Read-ExpectedDigest $serviceHost $sums) $serviceHost
+  Write-Host 'Verifying Windows ConPTY companion...'
 
+  Write-Host 'Checking Windows ConPTY tar inventory...'
   $tar = Get-Command tar -ErrorAction SilentlyContinue
   if (-not $tar) { throw 'tar is required to install the ConPTY companion' }
-  $listed = @(& $tar.Source -tzf $archive | ForEach-Object { $_ -replace '^\\./', '' } | Where-Object { $_ })
-  if ($LASTEXITCODE -ne 0) { throw "Failed to inspect $companion" }
-  $expectedEntries = @('node-pty-companion.json', 'win32-x64/', 'win32-x64/conpty.node', 'win32-x64/conpty_console_list.node', 'win32-x64/pty.node', 'win32-x64/winpty-agent.exe', 'win32-x64/winpty.dll', 'worker/', 'worker/conoutSocketWorker.js', 'shared/', 'shared/conout.js')
-  if (@($listed).Count -ne $expectedEntries.Count -or @($listed | Sort-Object -Unique).Count -ne $expectedEntries.Count -or @(Compare-Object ($listed | Sort-Object) ($expectedEntries | Sort-Object)).Count -ne 0) { throw "$companion contains an unexpected file inventory" }
-  & $tar.Source -xzf $archive -C $work
-  if ($LASTEXITCODE -ne 0) { throw "Failed to extract $companion" }
+  # Use a fixed relative name inside the download directory: Git for Windows
+  # GNU tar otherwise interprets a drive-letter archive path as host:archive.
+  Push-Location -LiteralPath $work
+  try {
+    $listed = @(& $tar.Source -tzf $companion | ForEach-Object { ($_ -replace '^\\./', '').TrimEnd([char]13) } | Where-Object { $_ })
+    if ($LASTEXITCODE -ne 0) { throw "Failed to inspect $companion" }
+    Write-Host 'Windows ConPTY tar listed.'
+    $expectedEntries = @('node-pty-companion.json', 'win32-x64/', 'win32-x64/conpty.node', 'win32-x64/conpty_console_list.node', 'win32-x64/pty.node', 'win32-x64/winpty-agent.exe', 'win32-x64/winpty.dll', 'worker/', 'worker/conoutSocketWorker.js', 'shared/', 'shared/conout.js')
+    if (@($listed).Count -ne $expectedEntries.Count -or @($listed | Sort-Object -Unique).Count -ne $expectedEntries.Count -or @(Compare-Object ($listed | Sort-Object) ($expectedEntries | Sort-Object)).Count -ne 0) { throw "$companion contains an unexpected file inventory" }
+    Write-Host 'Windows ConPTY inventory verified.'
+    & $tar.Source -xzf $companion
+    if ($LASTEXITCODE -ne 0) { throw "Failed to extract $companion" }
+    Write-Host 'Windows ConPTY extracted.'
+  } finally { Pop-Location }
 
+  Write-Host 'Checking Windows ConPTY manifest...'
   $manifest = Get-Content -Raw (Join-Path $work 'node-pty-companion.json') | ConvertFrom-Json
   if ($manifest.schemaVersion -ne 1 -or $manifest.product -ne 'kala-executor-node-pty-companion' -or $manifest.target -ne 'win32-x64' -or [string]$manifest.nodePtyVersion -notmatch '^\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw 'ConPTY companion manifest identity is invalid' }
   if (@($manifest.files).Count -ne 7) { throw 'ConPTY companion manifest file inventory is invalid' }
   $manifestPaths = @($manifest.files | ForEach-Object { [string]$_.path })
   $expectedManifestPaths = @('prebuilds/win32-x64/conpty.node', 'prebuilds/win32-x64/conpty_console_list.node', 'prebuilds/win32-x64/pty.node', 'prebuilds/win32-x64/winpty-agent.exe', 'prebuilds/win32-x64/winpty.dll', 'worker/conoutSocketWorker.js', 'shared/conout.js')
   if (@($manifestPaths).Count -ne $expectedManifestPaths.Count -or @($manifestPaths | Sort-Object -Unique).Count -ne $expectedManifestPaths.Count -or @(Compare-Object ($manifestPaths | Sort-Object) ($expectedManifestPaths | Sort-Object)).Count -ne 0) { throw 'ConPTY companion manifest file inventory is invalid' }
+  Write-Host 'Hashing Windows ConPTY files...'
   foreach ($file in @($manifest.files)) {
     $runtimePath = [string]$file.path
     if ($runtimePath -notmatch '^(prebuilds/win32-x64/(conpty\\.node|conpty_console_list\\.node|pty\\.node|winpty-agent\\.exe|winpty\\.dll)|worker/conoutSocketWorker\\.js|shared/conout\\.js)$') { throw 'ConPTY companion manifest contains an invalid path' }
@@ -182,9 +225,11 @@ try {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -ne [int64]$file.bytes) { throw "ConPTY companion size mismatch for $runtimePath" }
     Assert-Digest $path ([string]$file.sha256) $runtimePath
   }
+  Write-Host 'Windows ConPTY archive verified.'
   $prebuilds = Join-Path $work 'prebuilds'
   New-Item -ItemType Directory -Path $prebuilds -Force | Out-Null
   Move-Item (Join-Path $work 'win32-x64') (Join-Path $prebuilds 'win32-x64') -Force
+  Write-Host 'Starting verified Windows Executor...'
   if ($hostRelease) { & $binary @args } else { & $binary --internal-installer @args }
   if ($LASTEXITCODE -ne 0) { throw "Executor installer exited with code $LASTEXITCODE" }
 } finally {

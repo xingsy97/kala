@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinuxServicePlan, executeLinuxServicePlan, renderLinuxServiceFiles } from './linux-service.js'
 import { createMacosLaunchdService, executeLaunchdPlan } from './macos-launchd.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
+import { assertElevatedWindowsAdministrator, assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, WINDOWS_NODE_PTY_RUNTIME_FILES } from './windows-service.js'
 import type { InstallerSession } from './installer-session.js'
 
 const session: InstallerSession = {
@@ -256,6 +256,22 @@ describe('Windows service adapter', () => {
     }))
     await expect(registerWindowsSelfRemovalTask(removal, { platform: 'win32', runner: failingRunner })).rejects.toThrow('Unable to start Windows removal task')
     expect(failingRunner).toHaveBeenNthCalledWith(3, 'schtasks.exe', ['/Delete', '/TN', removal.taskName, '/F'])
+  })
+
+  it('checks effective Windows Administrator membership before consuming a service invite', async () => {
+    const runner = vi.fn(async (_file: string, _args: readonly string[]) => ({ exitCode: 0, stdout: '', stderr: '' }))
+    const options = { platform: 'win32' as const, systemRoot: 'C:\\Windows', runner }
+    await assertElevatedWindowsAdministrator(options)
+    expect(runner).toHaveBeenCalledTimes(1)
+    const [file, args] = runner.mock.calls[0]!
+    expect(file).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+    expect(args).toContain('-NoProfile')
+    expect(args.join(' ')).toContain('WindowsPrincipal')
+    expect(args.join(' ')).toContain('IsInRole')
+    await expect(assertElevatedWindowsAdministrator({ ...options, runner: async () => ({ exitCode: 1, stdout: '', stderr: '' }) })).rejects.toThrow('requires an elevated Administrator process')
+    await expect(assertElevatedWindowsAdministrator({ ...options, runner: async () => { throw new Error('PowerShell unavailable') } })).rejects.toThrow('requires an elevated Administrator process')
+    await expect(assertElevatedWindowsAdministrator({ ...options, systemRoot: 'relative' })).rejects.toThrow('requires an elevated Administrator process')
+    await expect(assertElevatedWindowsAdministrator({ ...options, platform: 'linux' })).rejects.toThrow('requires an elevated Administrator process')
   })
 
   it('restricts Windows service credentials to LocalSystem and Administrators before use', async () => {

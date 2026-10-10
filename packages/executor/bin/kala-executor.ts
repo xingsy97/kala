@@ -50,10 +50,10 @@ import { executorProfileDir, loadOrCreateWorkspaceId, normalizeExecutorProfile }
 import { acquireExecutorLock } from '../src/local-lock.js'
 import { assertSupportedInstallerPrivileges, bootstrapEnvironment, defaultManagedRoot, downloadExecutorUpdateAssets, redeemInstallation, reportInstallation, waitForApproval, writeInstallerSession } from '../src/installer-flow.js'
 import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, type Command } from '../src/linux-service.js'
-import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
+import { assertElevatedWindowsAdministrator, assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 import { parseMcpServerDeclaration, parseMcpServers, type McpServerConfig } from '../src/mcp-config.js'
 
@@ -328,8 +328,8 @@ async function runInviteInstaller(): Promise<void> {
     return
   }
   if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native kala-executor asset')
-  const integrity = spawnSync('whoami.exe', ['/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true })
-  if (integrity.status !== 0 || !/S-1-16-(?:12288|16384)/u.test(integrity.stdout)) throw new Error('Windows service installation requires an elevated Administrator process')
+  await assertElevatedWindowsAdministrator()
+  process.stdout.write('Starting Private Cloud invite enrollment.\n')
   const workspaceId = loadOrCreateWorkspaceId()
   const routeHint = hashExecutorInviteRoute(invite)
   let acceptToken!: (token: string) => void
@@ -343,7 +343,9 @@ async function runInviteInstaller(): Promise<void> {
     const enrollment = await Promise.race([Promise.all([handle.ready, enrolledToken]).then(([, token]) => ({ token })), handle.permanentError.then((error) => ({ error })), timedOut])
     if ('error' in enrollment) throw new Error(`Executor invite enrollment failed: ${enrollment.error.code}`)
     delete process.env.EXECUTOR_INVITE
+    process.stdout.write('Private Cloud invited device enrolled.\n')
     await handle.close()
+    process.stdout.write('Installing Private Cloud Windows service.\n')
     await installWindowsService({ HOST_URL: host, EXECUTOR_PRIVILEGE_MODE: 'privileged', EXECUTOR_INSTALL_ID: `invite-${routeHint}` }, workspaceRoot, enrollment.token, workspaceId, { routeHint, installationSource: 'private-cloud-invite', reportProgress: false })
   } finally {
     if (enrollmentTimeout) clearTimeout(enrollmentTimeout)

@@ -48,7 +48,12 @@ test('Private Cloud runtime image receives an exact-tag sealed Windows Executor 
   for (const asset of ['kala-executor-win32-x64.exe', 'kala-executor-service-host-win32-x64.exe', 'node-pty-win32-x64.tar.gz']) {
     assert.match(dockerfile, new RegExp(`cp /tmp/windows-assets/${asset.replaceAll('.', '\\.')} release/`, 'u'))
   }
-  assert.match(dockerfile, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--finalize-only[\s\S]*pnpm run verify:release-assets/u)
+  assert.match(dockerfile, /chmod \+x release\/kala-executor-win32-x64\.exe release\/kala-executor-service-host-win32-x64\.exe/u)
+  assert.match(dockerfile, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--finalize-only[\s\S]*pnpm run verify:release-assets -- --private-cloud-runtime/u)
+  const verifier = readFileSync(join(import.meta.dirname, 'verify-release-assets.mjs'), 'utf8')
+  assert.match(verifier, /privateCloudRuntime = process\.argv\.includes\('--private-cloud-runtime'\)/u)
+  assert.match(verifier, /JSON\.stringify\(actualNativeTargets\) !== JSON\.stringify\(\['win32-x64'\]\)/u)
+  assert.match(verifier, /'manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the four supported Executor targets'/u)
   assert.match(dockerfile, /COPY --from=build --chown=65532:65532 \/app\/release\/ \/app\/release\//u)
 })
 
