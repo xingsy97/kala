@@ -37,6 +37,16 @@ type PrototypeClientPayload = {
   parentSessionId?: string
 }
 
+// Fictional directory density for responsive Explorer screenshots. Keep the
+// transport shape and existing interactive Sessions unchanged.
+const sidebarWorkspaces = [
+  { id: 'workspace-build', name: 'Build Systems', os: 'linux', labels: ['Compare reproducible release assets', 'Trace an intermittent CI timeout', 'Harden build cache invalidation'] },
+  { id: 'workspace-docs', name: 'Documentation', os: 'darwin', labels: ['梳理移动端引导流程中的关键步骤', '检查术语在不同页面中的一致性', 'Map deployment prerequisites'] },
+  { id: 'workspace-infra', name: 'Infrastructure', os: 'linux', labels: ['Audit staging network boundaries', 'Check automatic recovery paths', 'Tune monitoring alerts'] },
+  { id: 'workspace-mobile', name: 'Mobile QA', os: 'win32', labels: ['Check small-screen navigation', 'Test touch target spacing', 'Review accessibility labels'] },
+  { id: 'workspace-storage', name: 'Storage Lab', os: 'linux', labels: ['Plan artifact retention limits', 'Verify backup restore checklist'] },
+] as const
+
 const sessions: PrototypeSessionSummary[] = [
   {
     sessionId: 'prototype-active',
@@ -195,11 +205,33 @@ const sessions: PrototypeSessionSummary[] = [
     createdAt: iso(-45),
     lastEventAt: iso(-12),
     eventCount: 2,
-    label: 'Audit dashboard accessibility',
-    firstUserMessage: 'Audit accessibility across the production Dashboard.',
+    label: '梳理移动端会话列表的排版层级',
+    firstUserMessage: '请检查移动端会话列表的字体、层级与无障碍表现。',
     status: 'idle',
     costUsd: 12.34,
   },
+  ...['比较桌面与手机布局中的标题可读性', 'Compare navigation options'].map((label, index): PrototypeSessionSummary => ({
+    sessionId: `prototype-chat-${index + 2}`,
+    agentRuntime: 'kernel', executionMode: 'chat',
+    createdAt: iso(-1_600 - index * 150), lastEventAt: iso(-110 - index * 25), eventCount: 3,
+    label, firstUserMessage: label, status: 'done',
+  })),
+  ...sidebarWorkspaces.flatMap((workspace, workspaceIndex) => workspace.labels.map((label, index): PrototypeSessionSummary => ({
+    sessionId: `prototype-${workspace.id.slice('workspace-'.length)}-${index + 1}`,
+    agentRuntime: 'kernel', executionMode: 'chat',
+    createdAt: iso(-2_000 - workspaceIndex * 400 - index * 100),
+    lastEventAt: iso(-20 - workspaceIndex * 30 - index * 7), eventCount: 3 + index,
+    workspaceId: workspace.id, workspaceName: workspace.name,
+    currentCwd: `/placeholder/${workspace.id.slice('workspace-'.length)}`,
+    label, firstUserMessage: label, status: index === 0 ? 'idle' : 'done',
+  }))),
+  ...['Revisit retired test fixtures', 'Summarize prior experiments'].map((label, index): PrototypeSessionSummary => ({
+    sessionId: `prototype-archive-${index + 1}`,
+    agentRuntime: 'kernel', executionMode: 'chat',
+    createdAt: iso(-10_000 - index * 1_000), lastEventAt: iso(-8_000 - index * 500), eventCount: 4,
+    workspaceId: 'workspace-archive', workspaceName: 'Archived Studies',
+    currentCwd: '/placeholder/archive', label, firstUserMessage: label, status: 'done',
+  })),
 ]
 
 const executors: AttachedExecutor[] = [
@@ -242,6 +274,14 @@ const executors: AttachedExecutor[] = [
     attachedAt: iso(-300),
     clientVersion: 'prototype',
   },
+  ...sidebarWorkspaces.map((workspace, index): AttachedExecutor => ({
+    executorId: `executor-${workspace.id.slice('workspace-'.length)}`,
+    workspaceId: workspace.id, workspaceName: workspace.name,
+    tools: ['read', 'write'], defaultCwd: `/placeholder/${workspace.id.slice('workspace-'.length)}`,
+    runtime: 'node', runtimeVersion: '22.0.0-placeholder',
+    hostname: `${workspace.id.slice('workspace-'.length)}.placeholder.example`,
+    os: workspace.os, attachedAt: iso(-420 - index * 50), clientVersion: 'prototype',
+  })),
 ]
 
 const activeMessages: Message[] = [

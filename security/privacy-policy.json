@@ -82,7 +82,10 @@
     "deploy/evaluation/fixtures/public-release-marathon.tar",
     "deploy/evaluation/fixtures/release-handoff.tar",
     "deploy/evaluation/fixtures/release-ledger-reconciliation.tar",
-    "deploy/evaluation/fixtures/service-release-v2.tar"
+    "deploy/evaluation/fixtures/service-release-v2.tar",
+    "packages/dashboard/src/prototype/fonts/lato-bold-latin.woff2",
+    "packages/dashboard/src/prototype/fonts/lato-medium-latin.woff2",
+    "packages/dashboard/src/prototype/fonts/lato-semibold-latin.woff2"
   ],
   "ruleExceptions": [
     { "rule": "privacy.non-example-email", "path": "pnpm-lock.yaml", "contentSha256": "6c0084e434cce8a734b2daea780518606a6d019f9c5acd7aa5e4266c28ea9084", "reason": "Historical third-party dependency deprecation notice cites its public maintainer contact; not project or user data." },
@@ -120,6 +123,9 @@
     "packages/dashboard/public/icons/windows.svg": ["11ac9b1e84c8c36c21629d03f26ce699b7d2e56bf702ea2e8eb2637cd2271c56"]
   },
   "allowedBinaryHashes": {
+    "packages/dashboard/src/prototype/fonts/lato-bold-latin.woff2": "5a32f88bc5c6391b35d3b6744e3fa21cc91af16ebdf259972e447964d732e310",
+    "packages/dashboard/src/prototype/fonts/lato-medium-latin.woff2": "e8c72cbdfa3a44214464fb2b0dff54f79b0ca1f15d597d255c3a18d32692d5ec",
+    "packages/dashboard/src/prototype/fonts/lato-semibold-latin.woff2": "5744401dda77320bdfd349ad2e8fd360efb335d73fbcd367380ea7d87a9eec9e",
     "docs/assets/kala-dashboard-preview.png": "6b7546ce92a20f82432f67206bae084aa9dff4ea89ade4c277c8b38c35c17dce",
     "docs/assets/kala-dashboard-preview.gif": "066defdbd55284e21f9917bf21c8dbd935e8028e47041499b8695a567c3ce1d8",
     "docs/assets/kala-dashboard-preview.mp4": "4831bdf041beda44ed26f24082c1d154612ca1340b788e5ede0f4a99a1b6dc8b",

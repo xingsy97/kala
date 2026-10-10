@@ -1,0 +1,70 @@
+/* Typography comparison for the fictional sidebar prototype; production never imports it. */
+@font-face {
+  font-family: 'Lato Mock';
+  src: url('./fonts/lato-medium-latin.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lato Mock';
+  src: url('./fonts/lato-semibold-latin.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Lato Mock';
+  src: url('./fonts/lato-bold-latin.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+.ak-workspace-row .ak-workspace-title-cell {
+  color: hsl(var(--foreground) / 0.88) !important;
+  font-size: 23px !important;
+  font-weight: 680 !important;
+  line-height: 1.28 !important;
+  letter-spacing: -0.018em;
+}
+
+.ak-session-row .ak-session-title-cell {
+  color: hsl(var(--foreground) / 0.98) !important;
+  font-size: 19px !important;
+  line-height: 1.32 !important;
+  letter-spacing: -0.018em;
+}
+
+.ak-session-row .ak-session-label {
+  font-weight: 600 !important;
+}
+
+.ak-session-row[data-selected='true'] {
+  background-color: hsl(var(--foreground) / 0.05) !important;
+}
+
+.ak-session-row[data-selected='true'] .ak-session-label {
+  font-weight: 650 !important;
+}
+
+.ak-session-row [data-testid='session-selected-marker'] {
+  display: none;
+}
+
+html[data-sidebar-typography='inter'] .ak-workspace-title-cell,
+html[data-sidebar-typography='inter'] .ak-session-title-cell {
+  font-family: 'Inter Variable', 'Noto Sans SC Variable', sans-serif;
+}
+
+html[data-sidebar-typography='noto'] .ak-workspace-title-cell,
+html[data-sidebar-typography='noto'] .ak-session-title-cell {
+  font-family: 'Noto Sans SC Variable', 'Inter Variable', sans-serif;
+}
+
+html[data-sidebar-typography='lato'] .ak-workspace-title-cell,
+html[data-sidebar-typography='lato'] .ak-session-title-cell {
+  font-family: 'Lato Mock', 'Noto Sans SC Variable', sans-serif;
+}
