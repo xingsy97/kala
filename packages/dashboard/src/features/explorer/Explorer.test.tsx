@@ -388,7 +388,8 @@ describe('Explorer', () => {
     const wsRow = screen.getByTestId('workspace-row')
     expect(wsRow.getAttribute('data-workspace-id')).toBe('ws-1')
     expect(wsRow.getAttribute('data-online')).toBe('true')
-    expect(wsRow.className).toContain('grid-cols-[1.25rem_minmax(0,1fr)_auto]')
+    expect(wsRow.className).toContain('grid-cols-[1.25rem_minmax(0,1fr)]')
+    expect(wsRow.querySelector('[data-row-action]')?.className).toContain('absolute')
     expect(wsRow.className).toContain('relative')
     expect(wsRow.textContent).toContain('my-mbp')
     expect(screen.getByTestId('workspace-drag-handle')).toBeTruthy()
@@ -591,7 +592,7 @@ describe('Explorer', () => {
     expect(screen.queryByTestId('session-status-spinner')).toBeNull()
   })
 
-  it('uses restrained semibold session typography when the session is not running', () => {
+  it('uses restrained medium typography for the selected non-running session', () => {
     render(
       <Explorer
         executors={[executor]}
@@ -606,7 +607,8 @@ describe('Explorer', () => {
     )
 
     const label = screen.getByTestId('session-row').querySelector('.ak-session-label')
-    expect(label?.classList.contains('font-semibold')).toBe(true)
+    expect(label?.classList.contains('font-medium')).toBe(true)
+    expect(label?.classList.contains('font-semibold')).toBe(false)
     expect(label?.classList.contains('font-extrabold')).toBe(false)
     expect(label?.classList.contains('ak-thinking-text')).toBe(false)
     expect(label?.classList.contains('ak-session-running-label')).toBe(false)
@@ -766,14 +768,18 @@ describe('Explorer', () => {
     expect(sessionRow.className).toContain('ak-session-row')
     expect(sessionRow.className).toContain('items-center')
     expect(sessionRow.className).not.toContain('ml-4')
-    expect(sessionRow.className).toContain('pl-6')
-    expect(sessionRow.className).toContain('py-1.5')
+    expect(sessionRow.className).toContain('pl-2.5')
+    expect(sessionRow.className).toContain('py-1')
+    expect(sessionRow.querySelector('.ak-session-label')?.className).toContain('font-normal')
+    expect((sessionRow.querySelector('.ak-session-title-cell') as HTMLElement).style.getPropertyValue('--ak-session-font-size')).toBe('13px')
+    expect((screen.getByTestId('workspace-row').querySelector('.ak-workspace-title-cell') as HTMLElement).style.getPropertyValue('--ak-workspace-font-size')).toBe('12px')
     expect((sessionRow as HTMLElement).style.width).not.toContain('calc')
     expect(sessionRow.textContent).toContain('please write hello.txt')
     expect(sessionRow.textContent).not.toContain('done')
     expect(sessionRow.textContent).not.toContain('4 evt')
     expect(screen.queryByTestId('session-status-indicator')).toBeNull()
     expect(screen.getByTestId('session-drag-handle').querySelector('svg')?.className.baseVal).not.toContain('opacity-0')
+    expect(screen.getByTestId('session-drag-handle').className).toContain('opacity-25')
     // The working directory is no longer a persistent second line — it is shown
     // on hover via the session name's title tooltip (keeps the card single-line).
     expect(sessionRow.querySelector('[title="/tmp"]')).not.toBeNull()
@@ -782,6 +788,24 @@ describe('Explorer', () => {
     expect(lastActivity.parentElement?.className).toContain('ak-session-last-activity')
     expect(lastActivity.parentElement?.className).toContain('flex')
     expect(lastActivity.parentElement?.className.split(/\s+/)).not.toContain('hidden')
+  })
+
+  it('uses the phone row cadence only at phone widths', () => {
+    const previousWidth = window.innerWidth
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+      render(<Explorer executors={[executor]} sessions={[sessionSummary]} selectedSessionId={null}
+        onSelect={() => {}} onNewSession={() => {}} onConnectWorkspace={() => {}} onDelete={() => {}} onRename={() => {}} />)
+      expect(screen.getByTestId('session-row').parentElement?.style.height).toBe('56px')
+      expect(screen.getByTestId('workspace-row').parentElement?.style.height).toBe('54px')
+
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 })
+      fireEvent(window, new Event('resize'))
+      expect(screen.getByTestId('session-row').parentElement?.style.height).toBe('38px')
+      expect(screen.getByTestId('workspace-row').parentElement?.style.height).toBe('36px')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth })
+    }
   })
 
   it('overrides the selected session row with the live working status', () => {
@@ -1388,7 +1412,8 @@ describe('Explorer', () => {
       />,
     )
     const sessionRow = screen.getByTestId('session-row')
-    expect(sessionRow.className).toContain('bg-muted/45')
+    expect(sessionRow.className).toContain('bg-muted/55')
+    expect(sessionRow.querySelector('.ak-session-label')?.className).toContain('font-medium')
     expect(sessionRow.className).toContain('ak-session-row')
     expect(sessionRow.className).not.toMatch(/border-l-primary/)
     expect(sessionRow.className).not.toContain('shadow-[inset_0_0_0_1px')

@@ -123,10 +123,12 @@ type Props = {
   subscribeCachedSessionView?: (sessionId: string, listener: () => void) => () => void
 }
 
-const SESSION_ROW_HEIGHT = 40
-const WORKSPACE_ROW_HEIGHT = 42
+const SESSION_ROW_HEIGHT = 38
+const WORKSPACE_ROW_HEIGHT = 36
+const PHONE_SESSION_ROW_HEIGHT = 56
+const PHONE_WORKSPACE_ROW_HEIGHT = 54
 const EXPLORER_ROW_GRID = 'ak-session-row grid items-center gap-x-2.5'
-const WORKSPACE_ROW_GRID = 'grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2.5'
+const WORKSPACE_ROW_GRID = 'grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-x-2.5'
 const EXPLORER_RAIL_CELL = 'flex h-5 w-5 flex-none items-center justify-center'
 
 export type SessionActivityStatus = SessionSummary['status'] | 'loading'
@@ -158,10 +160,20 @@ function ExplorerImpl({
 }: Props): JSX.Element {
   const { t } = useTranslation()
   const interfaceScale = useInterfaceScale()
-  const rowHeightFor = useCallback((node: NodeApi<TreeNode>): number => Math.ceil(Math.max(
-    (node.data.kind === 'workspace' ? WORKSPACE_ROW_HEIGHT : SESSION_ROW_HEIGHT) * interfaceScale,
-    fontSizePx * 1.4 + 9 * interfaceScale,
-  )), [fontSizePx, interfaceScale])
+  const [phoneLayout, setPhoneLayout] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 640)
+  useEffect(() => {
+    const update = (): void => setPhoneLayout(window.innerWidth <= 640)
+    window.addEventListener('resize', update)
+    update()
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  const rowHeightFor = useCallback((node: NodeApi<TreeNode>): number => {
+    const workspace = node.data.kind === 'workspace'
+    const height = phoneLayout
+      ? workspace ? PHONE_WORKSPACE_ROW_HEIGHT : PHONE_SESSION_ROW_HEIGHT
+      : workspace ? WORKSPACE_ROW_HEIGHT : SESSION_ROW_HEIGHT
+    return Math.ceil(Math.max(height * interfaceScale, fontSizePx * 1.4 + 9 * interfaceScale))
+  }, [fontSizePx, interfaceScale, phoneLayout])
   const [pendingDelete, setPendingDelete] = useState<SessionNode | null>(null)
   const [deleteConfirmationStep, setDeleteConfirmationStep] = useState<'review' | 'final'>('review')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
@@ -445,7 +457,7 @@ function ExplorerImpl({
             onMove={handleMove}
             renderRow={TreeRow}
             rowHeight={rowHeightFor}
-            indent={12}
+            indent={8}
             width={bounds.width}
             height={bounds.height}
           >
@@ -1016,7 +1028,7 @@ function WorkspaceRow({
         if (!editing) node.toggle()
       }}
       className={cn(
-        'group/ws relative min-w-0 cursor-pointer select-none rounded-lg px-3 py-1.5 transition-colors hover:bg-muted/55',
+        'ak-workspace-row group/ws relative min-w-0 cursor-pointer select-none rounded-lg px-2.5 py-1 transition-colors hover:bg-muted/35',
         WORKSPACE_ROW_GRID,
       )}
     >
@@ -1050,10 +1062,10 @@ function WorkspaceRow({
         />
       ) : (
         <div className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2">
-          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-3.5 w-3.5" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{statusLabel}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" data-os={w.os ?? 'unknown'} title={iconLabel} role="img" aria-label={iconLabel}><WorkspaceOsIcon os={w.os} /></span>}
+          {w.workspaceId === null ? <span className="inline-flex h-5 w-5 flex-none items-center justify-center text-muted-foreground/75"><Sparkles className="h-3.5 w-3.5" data-testid="chats-icon" aria-hidden="true" /><span className="sr-only">{statusLabel}</span></span> : <span className={cn('inline-flex h-5 w-5 flex-none items-center justify-center transition-colors', workspaceIconCls)} data-testid="workspace-status-icon" data-os={w.os ?? 'unknown'} title={iconLabel} role="img" aria-label={iconLabel}><WorkspaceOsIcon os={w.os} /></span>}
           <span
-            className="min-w-0 truncate font-semibold leading-5 text-foreground"
-            style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
+            className="ak-workspace-title-cell min-w-0 truncate font-medium leading-5 text-muted-foreground group-hover/ws:text-foreground"
+            style={{ fontSize: Math.max(11, fontSizePx - 1), lineHeight: 1.35, '--ak-workspace-font-size': `${Math.max(11, fontSizePx - 1)}px` } as React.CSSProperties}
             title={canRename ? t('explorer.doubleClickRename') : undefined}
             onDoubleClick={(e) => {
               if (!canRename) return
@@ -1066,7 +1078,7 @@ function WorkspaceRow({
           </span>
         </div>
       )}
-      <div data-row-action className="ak-touch-reveal pointer-events-none flex min-w-0 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100">
+      <div data-row-action className="ak-touch-reveal pointer-events-none absolute right-1 top-1/2 flex -translate-y-1/2 items-center justify-end gap-0.5 rounded-md bg-card/95 pl-1 opacity-0 transition-opacity group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100">
         {canOpenTerminal && !editing ? (
           <button
             type="button"
@@ -1223,9 +1235,9 @@ function SessionRow({
       data-selected={selected ? 'true' : 'false'}
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        'group relative min-w-0 cursor-pointer overflow-hidden rounded-lg py-1.5 pl-6 pr-3 transition-[background-color,box-shadow,color]',
-        'hover:bg-muted/45',
-        selected && 'bg-muted/45',
+        'group relative min-w-0 cursor-pointer overflow-hidden rounded-xl py-1 pl-2.5 pr-2.5 transition-[background-color,color]',
+        'hover:bg-muted/35',
+        selected && 'bg-muted/55',
         EXPLORER_ROW_GRID,
       )}
       onClick={() => {
@@ -1273,7 +1285,7 @@ function SessionRow({
         onPreviewLeave(s.sessionId)
       }}
     >
-      {selected ? <span className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-r bg-primary/80" data-testid="session-selected-marker" aria-hidden="true" /> : null}
+      {selected ? <span className="absolute bottom-2 left-0 top-2 w-0.5 rounded-r bg-primary/55" data-testid="session-selected-marker" aria-hidden="true" /> : null}
       <div className={EXPLORER_RAIL_CELL}>
         {s.children.length > 0 ? (
           <button
@@ -1299,7 +1311,7 @@ function SessionRow({
           <div
             ref={dragHandle}
             data-row-action
-            className="flex h-4 w-3.5 flex-none cursor-grab items-center justify-center text-muted-foreground/45 opacity-70 active:cursor-grabbing group-hover:text-muted-foreground/80"
+            className="flex h-4 w-3.5 flex-none cursor-grab items-center justify-center text-muted-foreground/70 opacity-25 transition-opacity active:cursor-grabbing group-hover:opacity-80 group-focus-within:opacity-80"
             title={t('explorer.dragSession')}
             aria-label={t('explorer.dragSession')}
             data-testid="session-drag-handle"
@@ -1324,10 +1336,10 @@ function SessionRow({
       ) : (
         <div
           className={cn(
-            'ak-session-title-cell flex min-w-0 items-center gap-1.5 truncate font-medium leading-5',
+            'ak-session-title-cell flex min-w-0 items-center gap-1.5 truncate font-normal leading-5',
             selected ? 'text-foreground' : 'text-foreground/88',
           )}
-          style={{ fontSize: fontSizePx, lineHeight: 1.35 }}
+          style={{ fontSize: fontSizePx, lineHeight: 1.35, '--ak-session-font-size': `${fontSizePx}px` } as React.CSSProperties}
           title={currentCwd || t('explorer.doubleClickRename')}
         >
           {showsInlineSessionStatus(status) && !isRunningSessionStatus(status)
@@ -1335,7 +1347,8 @@ function SessionRow({
             : null}
           <span
             className={cn(
-              'ak-session-label min-w-0 truncate font-semibold',
+              'ak-session-label min-w-0 truncate',
+              isRunningSessionStatus(status) ? 'font-semibold' : selected ? 'font-medium' : 'font-normal',
               isRunningSessionStatus(status) && 'ak-thinking-text ak-session-running-label',
             )}
             data-testid={isRunningSessionStatus(status) ? 'running-session-label' : undefined}

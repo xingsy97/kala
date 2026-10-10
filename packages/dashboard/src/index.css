@@ -30,11 +30,11 @@
   }
 
   .ak-session-row {
-    grid-template-columns: 1.25rem minmax(0, 13.5rem) minmax(3.25rem, auto);
+    grid-template-columns: 1.25rem minmax(0, 1fr) max-content;
   }
 
   .ak-session-title-cell {
-    max-width: 13.5rem;
+    max-width: 100%;
   }
 
   .ak-session-row-actions {
@@ -894,11 +894,11 @@
 
 @container (max-width: 22rem) {
   .ak-session-row {
-    grid-template-columns: 1.25rem minmax(0, 17rem) 0;
+    grid-template-columns: 1.25rem minmax(0, 1fr) 0;
   }
 
   .ak-session-title-cell {
-    max-width: 17rem;
+    max-width: 100%;
   }
 
   .ak-session-last-activity {
@@ -1086,11 +1086,57 @@ body {
   .ak-touch-hide {
     display: none !important;
   }
+  /* Touch has no hover: reserve space for always-visible Workspace actions. */
+  .ak-workspace-row {
+    grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+  }
+  .ak-workspace-row > [data-row-action] {
+    position: static;
+    transform: none;
+    background: transparent;
+    padding-left: 0;
+  }
   /* Keep the persistent split sidebar's single action menu touch-sized. */
   .ak-session-row-actions > .ak-session-more-button {
     display: inline-flex;
     width: 2.25rem;
     height: 2.25rem;
+  }
+}
+
+/* Approved A typography for phone-sized Explorer; keep wider layouts unchanged. */
+@media (max-width: 640px) {
+  .ak-workspace-row .ak-workspace-title-cell {
+    color: hsl(var(--foreground) / 0.88) !important;
+    font-family: 'Inter Variable', 'Noto Sans SC Variable', sans-serif;
+    font-size: max(23px, var(--ak-workspace-font-size, 23px)) !important;
+    font-weight: 680 !important;
+    line-height: 1.28 !important;
+    letter-spacing: -0.018em;
+  }
+
+  .ak-session-row .ak-session-title-cell {
+    color: hsl(var(--foreground) / 0.98) !important;
+    font-family: 'Inter Variable', 'Noto Sans SC Variable', sans-serif;
+    font-size: max(19px, var(--ak-session-font-size, 19px)) !important;
+    line-height: 1.32 !important;
+    letter-spacing: -0.018em;
+  }
+
+  .ak-session-row .ak-session-label {
+    font-weight: 600 !important;
+  }
+
+  .ak-session-row[data-selected='true'] {
+    background-color: hsl(var(--foreground) / 0.05) !important;
+  }
+
+  .ak-session-row[data-selected='true'] .ak-session-label {
+    font-weight: 650 !important;
+  }
+
+  .ak-session-row [data-testid='session-selected-marker'] {
+    display: none;
   }
 }
 
