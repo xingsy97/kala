@@ -14,21 +14,29 @@ function response(body: unknown, ok = true): Response {
 }
 
 describe('ConnectWorkspaceDialog', () => {
+  let windowsCapability: 'ready' | 'unavailable' | 'error' | 'invalid'
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
   beforeEach(() => {
+    windowsCapability = 'unavailable'
     vi.useFakeTimers({ shouldAdvanceTime: true })
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Linux x86_64' })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const rawUrl = String(input)
-      const url = rawUrl.replace(/^http:\/\/host\.test:5301/u, '')
+      const url = rawUrl.replace(/^http:\/\/host\.test:5301/u, '').replace(/^https:\/\/cloud\.example\.test/u, '')
+      if (url === '/api/executor-install-capabilities') {
+        if (windowsCapability === 'error') return response({ error: 'unavailable' }, false)
+        if (windowsCapability === 'invalid') return response({ platforms: { windows: { available: 'true' } } })
+        return response({ platforms: { linux: { available: true }, macos: { available: true }, windows: { available: windowsCapability === 'ready' } } })
+      }
       if ((url === '/auth/executor-invites' || url === 'https://cloud.example.test/auth/executor-invites') && init?.method === 'POST') return response({ id: 'inv_1', inviteToken: 'ak_invite_org_a' })
       if (url === '/api/executor-installs' && init?.method === 'POST') {
         const input = JSON.parse(String(init.body)) as Record<string, string>
+        if (input.platform === 'windows') return response({ ...base, ...input, command: "$env:KALA_SETUP_CODE='F6E7D8C9B0'; irm 'http://localhost:3000/install.ps1' | iex" })
         if (input.platform === 'macos' || input.mode === 'temporary') {
           return response({
             ...base,
@@ -65,7 +73,7 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-linux').querySelector('img')?.getAttribute('src')).toBe('/icons/linux.svg')
     expect(screen.getByTestId('connect-workspace-macos').querySelector('img')?.getAttribute('src')).toBe('/icons/macos.svg')
     expect(screen.getByTestId('connect-workspace-windows').hasAttribute('disabled')).toBe(true)
-    expect(screen.getByTestId('connect-workspace-windows-notice').textContent).toContain('not available in this release')
+    expect(screen.getByTestId('connect-workspace-windows-notice').textContent).toContain('not available on this deployment')
     expect(screen.getByTestId('installation-status').querySelector('svg')).toBeTruthy()
     const dialog = screen.getByTestId('connect-workspace-dialog')
     expect(dialog.className).toContain('rounded-t-2xl')
@@ -103,17 +111,37 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.getByTestId('connect-workspace-macos')).toBeTruthy()
   })
 
-  it('shows Windows as unavailable without requesting Windows installation on a Windows browser', async () => {
+  it('fails closed without silently installing Linux on a Windows browser', async () => {
     Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' })
     render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
-    await screen.findByText(/curl -fsSL/)
-    const windows = screen.getByTestId('connect-workspace-windows')
-    expect(windows.hasAttribute('disabled')).toBe(true)
-    fireEvent.click(windows)
-    expect(screen.getByTestId('connect-workspace-windows-notice').textContent).toContain('not available in this release')
-    expect(screen.getByTestId('connect-workspace-linux').getAttribute('aria-pressed')).toBe('true')
-    const createCall = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === 'POST')
-    expect(String(createCall?.[1]?.body)).toContain('"platform":"linux"')
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === '/api/executor-install-capabilities')).toBe(true))
+    expect(screen.getByTestId('connect-workspace-windows').hasAttribute('disabled')).toBe(true)
+    expect(screen.getByTestId('connect-workspace-windows').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('connect-workspace-windows-notice').textContent).toContain('not available on this deployment')
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+    expect(screen.getByTestId('copy-executor-command').hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByTestId('connect-workspace-linux'))
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST')).toBe(true))
+  })
+
+  it('creates a Windows install only after explicit Host asset readiness', async () => {
+    windowsCapability = 'ready'
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' })
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+    await screen.findByText(/install\.ps1/)
+    expect(screen.getByTestId('connect-workspace-windows').hasAttribute('disabled')).toBe(false)
+    const creates = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/executor-installs' && init?.method === 'POST')
+    expect(creates).toHaveLength(1)
+    expect(JSON.parse(String(creates[0]?.[1]?.body))).toMatchObject({ platform: 'windows', mode: 'service' })
+  })
+
+  it.each(['error', 'invalid'] as const)('keeps Windows disabled when capability is %s', async (kind) => {
+    windowsCapability = kind
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' })
+    render(<ConnectWorkspaceDialog open onOpenChange={() => {}} />)
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === '/api/executor-install-capabilities')).toBe(true))
+    expect(screen.getByTestId('connect-workspace-windows').hasAttribute('disabled')).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
   })
 
   it('immediately shows the target run mode, keeps the previous command visible, and prevents copying while refreshing', async () => {
@@ -174,6 +202,22 @@ describe('ConnectWorkspaceDialog', () => {
     expect(screen.queryByTestId('connect-workspace-expert-mode')).toBeNull()
     expect(vi.mocked(fetch).mock.calls.some(([url, init]) => String(url) === 'https://cloud.example.test/auth/executor-invites' && init?.method === 'POST')).toBe(true)
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/executor-installs'))).toBe(false)
+  })
+
+  it('issues a Windows PowerShell invite command only with Private Cloud asset readiness', async () => {
+    windowsCapability = 'ready'
+    render(<ConnectWorkspaceDialog open privateCloud organizationRole="admin" host="https://cloud.example.test" onOpenChange={() => {}} />)
+    await screen.findByText(/EXECUTOR_INVITE=/)
+    fireEvent.click(screen.getByTestId('connect-workspace-windows'))
+    await waitFor(() => expect(screen.getByTestId('executor-terminal-command').textContent).toContain('/install/invite.ps1'))
+    const command = screen.getByTestId('executor-terminal-command').textContent ?? ''
+    expect(command).toContain("$env:EXECUTOR_INVITE='ak_invite_org_a'")
+    expect(command).toContain("$env:KALA_RELEASE_TRUST='host'")
+    expect(command).toContain("$env:KALA_INVITE_INSTALL_MODE='service'")
+    expect(command).not.toContain('curl -fsSL')
+    fireEvent.click(screen.getByTestId('connect-workspace-temporary'))
+    await waitFor(() => expect(screen.getByTestId('executor-terminal-command').textContent).toContain("KALA_INVITE_INSTALL_MODE='temporary'"))
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/auth/executor-invites'))).toHaveLength(1)
   })
 
   it('clearly blocks non-admin members without creating an invite', async () => {

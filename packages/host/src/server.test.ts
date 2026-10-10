@@ -2168,10 +2168,13 @@ describe('wire protocol', () => {
     const localSessionsDir = mkdtempSync(join(tmpdir(), 'agent-kernel-windows-release-sessions-'))
     const assets = new Map([
       ['kala-executor-win32-x64.exe', Buffer.from('native-executor-fixture')],
+      ['kala-executor-service-host-win32-x64.exe', Buffer.from('service-host-fixture')],
       ['node-pty-win32-x64.tar.gz', Buffer.from('conpty-companion-fixture')],
       ['install-executor.ps1', Buffer.from("Write-Host 'installer fixture'\n")],
     ])
-    for (const [name, content] of assets) await writeFile(join(releaseDir, name), content)
+    for (const [name, content] of assets) {
+      if (name !== 'kala-executor-service-host-win32-x64.exe') await writeFile(join(releaseDir, name), content)
+    }
     await writeFile(join(releaseDir, 'SHA256SUMS'), [...assets].map(([name, content]) => `${createHash('sha256').update(content).digest('hex')}  ${name}`).join('\n') + '\n')
     const localServer = await startHostServer({
       port: 0,
@@ -2182,6 +2185,16 @@ describe('wire protocol', () => {
     })
 
     try {
+      const capabilityUrl = `http://localhost:${localServer.port}/api/executor-install-capabilities`
+      const incomplete = await fetch(capabilityUrl)
+      expect(incomplete.status).toBe(200)
+      await expect(incomplete.json()).resolves.toMatchObject({ platforms: { windows: { available: false } } })
+      expect((await fetch(`http://localhost:${localServer.port}/install.ps1`)).status).toBe(410)
+
+      const serviceHost = assets.get('kala-executor-service-host-win32-x64.exe')!
+      await writeFile(join(releaseDir, 'kala-executor-service-host-win32-x64.exe'), serviceHost)
+      const complete = await fetch(capabilityUrl)
+      await expect(complete.json()).resolves.toMatchObject({ platforms: { windows: { available: true } } })
       const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1`)
       expect(powershell.status).toBe(200)
       expect(await powershell.text()).toContain('/install/assets/install-executor.ps1')
@@ -2191,6 +2204,11 @@ describe('wire protocol', () => {
       })
       expect(created.status).toBe(201)
       expect((await created.json()) as { command: string }).toHaveProperty('command', expect.stringContaining('/install.ps1'))
+
+      await writeFile(join(releaseDir, 'kala-executor-service-host-win32-x64.exe'), Buffer.from('tampered-service-host'))
+      const checksumMismatch = await fetch(capabilityUrl)
+      await expect(checksumMismatch.json()).resolves.toMatchObject({ platforms: { windows: { available: false } } })
+      expect((await fetch(`http://localhost:${localServer.port}/install.ps1`)).status).toBe(410)
     } finally {
       await localServer.close()
       rmSync(releaseDir, { recursive: true, force: true })

@@ -26,27 +26,151 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
+      revision: ${{ steps.release.outputs.revision }}
     steps:
       - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
       - id: release
         env:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           TAG="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
           node scripts/release/version-policy.mjs --tag "$TAG"
+          REVISION="$(git rev-parse "$TAG^{commit}")"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            test "$GITHUB_REF" = "refs/tags/$TAG"
+            test "$REVISION" = "$GITHUB_SHA"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
+
+  windows-assets:
+    needs: resolve
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}', fetch-depth: 0 }
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable; corepack prepare pnpm@11.3.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - name: Require GNU tar and gzip from Git for Windows for reproducible archives
+        shell: pwsh
+        run: |
+          $tools = Join-Path $env:ProgramFiles 'Git\usr\bin'
+          foreach ($name in @('tar.exe', 'gzip.exe')) {
+            if (-not (Test-Path (Join-Path $tools $name))) { throw "Missing Git for Windows GNU archive tool $name" }
+          }
+          if ((& (Join-Path $tools 'tar.exe') --version | Select-Object -First 1) -notmatch 'GNU tar') { throw 'Git for Windows tar is not GNU tar' }
+          $tools | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          'TAR_OPTIONS=--force-local' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: pnpm run verify:version -- --tag ${{ needs.resolve.outputs.tag }}
+      - run: pnpm run build
+      - name: Build the platform-neutral Portable Host on Windows Node.js 22
+        run: pnpm run build:release-assets -- --component all --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --no-native
+      - name: Capture the Windows-built Host and Copilot runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $capture = Join-Path $env:RUNNER_TEMP 'private-cloud-windows-captured'
+          New-Item -ItemType Directory -Force $capture | Out-Null
+          Copy-Item release/kala-dashboard-with-runtime.cjs $capture/
+          Copy-Item release/kala-copilot-runtime-win32-x64 $capture/
+          Copy-Item release/kala-copilot-runtime-node-win32-x64.node $capture/
+          $hostRelease = Join-Path $env:RUNNER_TEMP 'private-cloud-windows-host-release'
+          Copy-Item release $hostRelease -Recurse
+          "PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR=$hostRelease" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Remove-Item release -Recurse -Force
+      - name: Build the native Windows x64 Executor and ConPTY companion
+        run: pnpm run build:release-assets -- --component executor --tag ${{ needs.resolve.outputs.tag }} --repo ${{ github.repository }} --native-only --native-target win32-x64
+      - name: Bind the Windows capture to the exact tag revision and hashes
+        shell: pwsh
+        env:
+          CAPTURE_REVISION: '${{ needs.resolve.outputs.revision }}'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $capture = Join-Path $env:RUNNER_TEMP 'private-cloud-windows-captured'
+          if ((git rev-parse HEAD).Trim() -ne $env:CAPTURE_REVISION) { throw 'Windows release checkout differs from the tag revision' }
+          Copy-Item release/kala-executor-win32-x64.exe $capture/
+          Copy-Item release/node-pty-win32-x64.tar.gz $capture/
+          Copy-Item release/kala-executor-service-host-win32-x64.exe $capture/
+          Set-Location $capture
+          node -e "const fs=require('fs'),c=require('crypto');const names=fs.readdirSync('.').sort();const assets=Object.fromEntries(names.map(n=>[n,c.createHash('sha256').update(fs.readFileSync(n)).digest('hex')]));fs.writeFileSync('windows-capture-manifest.json',JSON.stringify({schemaVersion:1,revision:process.env.CAPTURE_REVISION,assets},null,2)+String.fromCharCode(10))"
+      - name: Prepare the exact source-built Windows install fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          tar -xzf release/node-pty-win32-x64.tar.gz -C release
+          New-Item -ItemType Directory -Path release/prebuilds -Force | Out-Null
+          Move-Item release/win32-x64 release/prebuilds/win32-x64 -Force
+          "PRODUCT_E2E_WINDOWS_EXECUTOR_RELEASE_DIR=$((Resolve-Path release).Path)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          node scripts/product-e2e/prepare-windows-release-fixture.mjs --host-release $env:PRODUCT_E2E_WINDOWS_HOST_RELEASE_DIR --executor-release release
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare the exact Windows Host/Executor install fixture' }
+      - name: Real Windows API created.command temporary install and invite.ps1 security preflight
+        env:
+          PRODUCT_E2E_WINDOWS_TARGET: executor
+          PRODUCT_E2E_WINDOWS_INVITE_PREFLIGHT: '1'
+        run: node scripts/product-e2e/verify-windows-terminal.mjs
+      - name: Real Windows API created.command service install and Host session gate
+        env:
+          PRODUCT_E2E_WINDOWS_TARGET: executor
+          PRODUCT_E2E_WINDOWS_SERVICE: '1'
+          PRODUCT_E2E_WINDOWS_TERMINAL_PORT: '3326'
+        run: node scripts/product-e2e/verify-windows-terminal.mjs
+      - name: Real Private Cloud valid invite temporary and service lifecycle
+        run: node scripts/product-e2e/verify-private-cloud-windows-invite.mjs
+      - uses: actions/upload-artifact@v5
+        with:
+          name: private-cloud-windows-captured-assets
+          path: ${{ runner.temp }}/private-cloud-windows-captured/*
+          if-no-files-found: error
 
   runtime-image:
-    needs: resolve
+    needs: [resolve, windows-assets]
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: write, id-token: write, attestations: write }
     outputs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
+      - name: Require the runtime source checkout to match the exact tag revision
+        env:
+          EXPECTED_REVISION: '${{ needs.resolve.outputs.revision }}'
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_REVISION"
       - name: Record tracked release docs for the gitless Docker context
         run: git ls-files -z -- docs/ > docs/.tracked-release-docs
+      - uses: actions/download-artifact@v5
+        with:
+          name: private-cloud-windows-captured-assets
+          path: ${{ runner.temp }}/private-cloud-windows-captured
+      - name: Validate and stage the exact Windows-captured revision for the runtime image
+        env:
+          EXPECTED_REVISION: '${{ needs.resolve.outputs.revision }}'
+          WINDOWS_CAPTURE_DIR: ${{ runner.temp }}/private-cloud-windows-captured
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto'
+          import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+          import { join } from 'node:path'
+          const root = process.env.WINDOWS_CAPTURE_DIR
+          const output = '.private-cloud-runtime-windows-assets'
+          const manifest = JSON.parse(readFileSync(join(root, 'windows-capture-manifest.json'), 'utf8'))
+          const expected = ['kala-copilot-runtime-node-win32-x64.node', 'kala-copilot-runtime-win32-x64', 'kala-dashboard-with-runtime.cjs', 'kala-executor-service-host-win32-x64.exe', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz']
+          const required = ['kala-executor-service-host-win32-x64.exe', 'kala-executor-win32-x64.exe', 'node-pty-win32-x64.tar.gz']
+          if (manifest.schemaVersion !== 1 || manifest.revision !== process.env.EXPECTED_REVISION) throw new Error('Windows capture revision mismatch')
+          if (JSON.stringify(Object.keys(manifest.assets).sort()) !== JSON.stringify(expected)) throw new Error('Windows capture manifest inventory is not exact')
+          if (JSON.stringify(readdirSync(root).sort()) !== JSON.stringify([...expected, 'windows-capture-manifest.json'].sort())) throw new Error('Windows capture artifact inventory is not closed')
+          for (const name of expected) {
+            const bytes = readFileSync(join(root, name))
+            if (createHash('sha256').update(bytes).digest('hex') !== manifest.assets[name]) throw new Error(`Windows capture checksum mismatch: ${name}`)
+          }
+          rmSync(output, { recursive: true, force: true })
+          mkdirSync(output)
+          for (const name of required) copyFileSync(join(root, name), join(output, name))
+          NODE
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -58,12 +182,15 @@ jobs:
           file: deploy/private-cloud/images/Dockerfile.runtime-service
           # platforms: linux/amd64,linux/arm64 # Linux arm64 is paused for the current release.
           platforms: linux/amd64
-          build-args: SOURCE_REVISION=${{ github.sha }}
+          build-args: |
+            SOURCE_REVISION=${{ needs.resolve.outputs.revision }}
+            RELEASE_TAG=${{ needs.resolve.outputs.tag }}
+            RELEASE_REPOSITORY=${{ github.repository }}
           push: true
           tags: ghcr.io/${{ github.repository }}-private-cloud-runtime:${{ needs.resolve.outputs.version }}
           labels: |
             org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.resolve.outputs.revision }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           provenance: mode=max
           sbom: true
@@ -83,6 +210,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -98,7 +226,7 @@ jobs:
           tags: ghcr.io/${{ github.repository }}-private-cloud-ingress:${{ needs.resolve.outputs.version }}
           labels: |
             org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.resolve.outputs.revision }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           provenance: mode=max
           sbom: true
@@ -118,6 +246,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -133,7 +262,7 @@ jobs:
           tags: ghcr.io/${{ github.repository }}-private-cloud-dashboard:${{ needs.resolve.outputs.version }}
           labels: |
             org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.resolve.outputs.revision }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           provenance: mode=max
           sbom: true
@@ -146,11 +275,12 @@ jobs:
           push-to-registry: true
 
   image-vulnerability-scan:
-    needs: [runtime-image, ingress-image, dashboard-image]
+    needs: [resolve, runtime-image, ingress-image, dashboard-image]
     runs-on: ubuntu-latest
     permissions: { contents: read, packages: read }
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
       - uses: docker/login-action@v3
         with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ github.token }}' }
       - name: Install pinned vulnerability scanners
@@ -205,6 +335,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
       - uses: actions/setup-node@v5
         with: { node-version: 22, package-manager-cache: false }
       - run: corepack enable && corepack prepare pnpm@11.3.0 --activate
@@ -229,6 +360,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v5
+        with: { ref: '${{ needs.resolve.outputs.revision }}' }
       - uses: actions/setup-node@v5
         with: { node-version: 22, package-manager-cache: false }
       - run: corepack enable && corepack prepare pnpm@11.3.0 --activate && pnpm install --frozen-lockfile
@@ -239,7 +371,7 @@ jobs:
             --runtime-image "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}" \
             --ingress-image "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}" \
             --dashboard-image "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}" \
-            --revision "${{ github.sha }}" \
+            --revision "${{ needs.resolve.outputs.revision }}" \
             --operator release/kala-private-cloud-linux-x64 \
             --archive "release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz"
           node scripts/release/verify-private-cloud-bundle.mjs release/private-cloud

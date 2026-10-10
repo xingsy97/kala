@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto'
 import { accessSync, constants, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -160,6 +161,31 @@ if (includesHost) {
   const embeddedAssets = JSON.parse(hostBundle.slice(embeddedAssetsStart + embeddedAssetsPrefix.length, embeddedAssetsEnd))
   for (const asset of embeddedAssets) assertSupportedReleaseAssetName(asset?.path, 'embedded Host assets')
   if (!embeddedAssets.some((asset) => asset.path === 'run.sh')) fail('release Host bundle must embed run.sh')
+  const windowsInstallAssets = ['kala-executor-win32-x64.exe', 'kala-executor-service-host-win32-x64.exe', 'node-pty-win32-x64.tar.gz', 'install-executor.ps1']
+  if (windowsInstallAssets.every((name) => manifest.assets.includes(name))) {
+    const embeddedByName = new Map()
+    for (const asset of embeddedAssets) {
+      if (embeddedByName.has(asset.path)) fail(`Portable Host has duplicate embedded asset ${asset.path}`)
+      let bytes
+      try { bytes = Buffer.from(asset.contentBase64, 'base64') } catch { fail(`Portable Host has invalid base64 for ${asset.path}`) }
+      if (bytes.toString('base64') !== asset.contentBase64) fail(`Portable Host has non-canonical base64 for ${asset.path}`)
+      embeddedByName.set(asset.path, bytes)
+    }
+    const embeddedIndex = embeddedByName.get('SHA256SUMS')?.toString('utf8')
+    if (!embeddedIndex) fail('Portable Host with Windows assets must embed SHA256SUMS')
+    const expected = new Map()
+    for (const line of embeddedIndex.split(/\r?\n/u).filter(Boolean)) {
+      const match = line.match(/^([0-9a-f]{64})  ([A-Za-z0-9][A-Za-z0-9._-]*)$/u)
+      if (!match || expected.has(match[2])) fail('Portable Host embedded SHA256SUMS is malformed or contains duplicates')
+      expected.set(match[2], match[1])
+    }
+    if (expected.has('kala-dashboard-with-runtime.cjs') || expected.has('SHA256SUMS')) fail('Portable Host embedded SHA256SUMS must be payload-only')
+    for (const name of windowsInstallAssets) {
+      const bytes = embeddedByName.get(name)
+      if (!bytes || !bytes.equals(readFileSync(join(releaseDir, name)))) fail(`Portable Host does not embed the final ${name}`)
+      if (expected.get(name) !== createHash('sha256').update(bytes).digest('hex')) fail(`Portable Host embedded SHA256SUMS does not authenticate ${name}`)
+    }
+  }
   if (!hostBundle.includes('__KALA_EMBEDDED_DOCS__')
     || !hostBundle.includes(Buffer.from('# Dedicated Platform Runtime Unit Refactor').toString('base64'))) {
     fail('release Host bundle is missing embedded product documentation')

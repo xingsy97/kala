@@ -36,7 +36,7 @@ type ExecutorInviteResponse = { id: string; inviteToken: string }
 type FormState = Pick<CreateExecutorInstall, 'platform' | 'mode' | 'privilegeMode'>
 
 const POLL_INTERVAL_MS = 2_000
-const PLATFORMS = ['linux', 'macos'] as const satisfies readonly ExecutorInstallPlatform[]
+const PLATFORMS = ['linux', 'macos', 'windows'] as const satisfies readonly ExecutorInstallPlatform[]
 const MODES: ExecutorInstallMode[] = ['service', 'temporary']
 const PRIVILEGE_MODES: ExecutorPrivilegeMode[] = ['privileged', 'restricted']
 
@@ -50,6 +50,8 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
   const [expertMode, setExpertMode] = useState(false)
   const [installation, setInstallation] = useState<InstallResponse | null>(null)
   const [command, setCommand] = useState('')
+  const [inviteToken, setInviteToken] = useState<string | null>(null)
+  const [windowsCapability, setWindowsCapability] = useState<{ key: string; available: boolean } | null>(null)
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copyError, setCopyError] = useState<string | null>(null)
@@ -60,6 +62,20 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
   const createdFormRef = useRef<FormState | null>(null)
   const installationIdRef = useRef<string | null>(null)
   const canCreateOrganizationInvite = !privateCloud || organizationRole === 'owner' || organizationRole === 'admin'
+  const capabilityKey = `${host ?? ''}:${privateCloud}`
+  const windowsAvailable = windowsCapability?.key === capabilityKey && windowsCapability.available
+
+  useEffect(() => {
+    if (!open || !canCreateOrganizationInvite) return
+    const controller = new AbortController()
+    void request<{ platforms?: { windows?: { available?: unknown } } }>(apiEndpoint(host, '/api/executor-install-capabilities'), { signal: controller.signal })
+      .then((capabilities) => {
+        if (!controller.signal.aborted) setWindowsCapability({ key: capabilityKey, available: capabilities?.platforms?.windows?.available === true })
+      }).catch(() => {
+        if (!controller.signal.aborted) setWindowsCapability({ key: capabilityKey, available: false })
+      })
+    return () => controller.abort()
+  }, [canCreateOrganizationInvite, capabilityKey, host, open])
 
   useEffect(() => {
     if (!open) {
@@ -72,6 +88,8 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
       installationIdRef.current = null
       setInstallation(null)
       setCommand('')
+      setInviteToken(null)
+      setWindowsCapability(null)
       setPairingCode(null)
       setError(null)
       setCopyError(null)
@@ -86,6 +104,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
       setInstallation(null)
       setPairingCode(null)
       setCommand('')
+      setInviteToken(null)
       setError(null)
       if (!canCreateOrganizationInvite) return () => controller.abort()
       void request<ExecutorInviteResponse>(apiEndpoint(host, '/auth/executor-invites'), {
@@ -95,12 +114,14 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
         signal: controller.signal,
       }).then((invite) => {
         if (generationRef.current !== generation) return
-        setCommand(organizationInviteCommand(host, invite.inviteToken))
+        setInviteToken(invite.inviteToken)
       }).catch((cause: unknown) => {
         if (!controller.signal.aborted && generationRef.current === generation) setError(errorMessage(cause))
       })
       return () => controller.abort()
     }
+    // Never silently create a Linux installation on a Windows browser.
+    if (installationIdRef.current || (form.platform === 'windows' && !windowsAvailable)) return () => controller.abort()
     const input = toApiInput(form)
     createdFormRef.current = form
     setError(null)
@@ -122,10 +143,19 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
     return () => controller.abort()
     // A session is created once per opening. Form edits are handled by the debounced PATCH effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canCreateOrganizationInvite, host, open, privateCloud])
+  }, [canCreateOrganizationInvite, host, open, privateCloud, !privateCloud && form.platform === 'windows', !privateCloud && form.platform === 'windows' && windowsAvailable])
+
+  useEffect(() => {
+    if (!privateCloud || !open) return
+    setCommand(inviteToken && (form.platform !== 'windows' || windowsAvailable)
+      ? organizationInviteCommand(host, inviteToken, form.platform, form.mode)
+      : '')
+    setCopied(false)
+  }, [form.mode, form.platform, host, inviteToken, open, privateCloud, windowsAvailable])
 
   useEffect(() => {
     if (privateCloud || !open || !installation || !createdFormRef.current || sameForm(form, createdFormRef.current)) return
+    if (form.platform === 'windows' && !windowsAvailable) { setCommandTransitioning(true); return }
     const previousInstallationId = installation.id
     const generation = generationRef.current
     const controller = new AbortController()
@@ -154,7 +184,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
       }
     })
     return () => controller.abort()
-  }, [form, host, installation, open, privateCloud])
+  }, [form, host, installation, open, privateCloud, windowsAvailable])
 
   useEffect(() => {
     if (privateCloud || !open || !installation) return
@@ -215,7 +245,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
   }
 
   const copy = async (): Promise<void> => {
-    if (commandTransitioning) return
+    if (commandTransitioning || !command || (form.platform === 'windows' && !windowsAvailable)) return
     try {
       await writeTextToClipboard(command)
       setCopyError(null)
@@ -260,8 +290,10 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
               </div>
               {canCreateOrganizationInvite ? (
                 <>
+                  <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} windowsAvailable={windowsAvailable} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
+                  {form.platform === 'windows' && windowsAvailable ? <ChoiceGroup label={t('explorer.connectDialog.runMode')} values={MODES} selected={form.mode} labelFor={(value) => t(`explorer.connectDialog.modes.${value}`)} onChange={(mode) => updateForm({ mode })} /> : null}
                   <SectionLabel index="1" label={t('explorer.connectDialog.runCommand')} />
-                  <TerminalCommand command={command} copied={copied} mode="temporary" modeLabel={t('explorer.connectDialog.organizationInviteMode')} transitioning={false} onCopy={() => void copy()} />
+                  <TerminalCommand command={command} copied={copied} mode={form.platform === 'windows' ? form.mode : 'temporary'} modeLabel={form.platform === 'windows' ? t(`explorer.connectDialog.modes.${form.mode}`) : t('explorer.connectDialog.organizationInviteMode')} transitioning={false} onCopy={() => void copy()} />
                   <p className="text-xs leading-5 text-muted-foreground">{t('explorer.connectDialog.organizationInviteTerminalHint')}</p>
                   {error || copyError ? <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{error ?? copyError}</p> : null}
                 </>
@@ -273,7 +305,7 @@ export function ConnectWorkspaceDialog({ open, onOpenChange, host, privateCloud 
           <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.2fr)] lg:gap-8">
             <section className="min-w-0 space-y-5" aria-label={t('executorPairing.installationOptions')}>
               <SectionLabel index="1" label={t('explorer.connectDialog.platform')} />
-              <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
+              <PlatformGroup label={t('explorer.connectDialog.platform')} selected={form.platform} windowsAvailable={windowsAvailable} labelFor={(value) => t(`explorer.connectDialog.platforms.${value}`)} onChange={(platform) => updateForm({ platform })} />
               <button
                 type="button"
                 role="switch"
@@ -335,13 +367,25 @@ function SectionLabel({ index, label }: { index: string; label: string }): JSX.E
   return <h3 className="flex items-center gap-2 text-sm font-medium text-foreground"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 font-mono text-caption text-primary">{index}</span>{label}</h3>
 }
 
-function PlatformGroup({ label, selected, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
+function PlatformGroup({ label, selected, windowsAvailable, labelFor, onChange }: { label: string; selected: ExecutorInstallPlatform; windowsAvailable: boolean; labelFor(value: ExecutorInstallPlatform): string; onChange(value: ExecutorInstallPlatform): void }): JSX.Element {
   const { t } = useTranslation()
   const icons = {
     linux: <img src={staticAssetUrl('/icons/linux.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
     macos: <img src={staticAssetUrl('/icons/macos.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
+    windows: <img src={staticAssetUrl('/icons/windows.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" />,
   }
-  return <fieldset className="min-w-0"><legend className="sr-only">{label}</legend><div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => <button key={value} type="button" aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'}`}>{icons[value]}<span className="text-center">{labelFor(value)}</span></button>)}<button type="button" disabled data-testid="connect-workspace-windows" className="flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl bg-muted/20 px-2 text-xs font-medium text-muted-foreground opacity-60"><img src={staticAssetUrl('/icons/windows.svg')} alt="" className="h-7 w-7 object-contain" aria-hidden="true" /><span>{t('explorer.connectDialog.platforms.windows')}</span><span className="text-center text-[0.625rem]">{t('explorer.connectDialog.windowsUnavailableShort')}</span></button></div><p className="mt-2 text-xs text-muted-foreground" data-testid="connect-workspace-windows-notice">{t('explorer.connectDialog.windowsUnavailable')}</p></fieldset>
+  return (
+    <fieldset className="min-w-0">
+      <legend className="sr-only">{label}</legend>
+      <div className="grid grid-cols-3 gap-2">{PLATFORMS.map((value) => (
+        <button key={value} type="button" disabled={value === 'windows' && !windowsAvailable} aria-pressed={selected === value} data-testid={`connect-workspace-${value}`} onClick={() => onChange(value)} className={`flex min-h-16 min-w-0 flex-col items-center justify-center gap-1.5 rounded-2xl px-2 text-xs font-medium transition-[background-color,color,box-shadow,transform] active:scale-[0.98] ${selected === value ? 'bg-accent text-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.5)]' : 'bg-muted/20 text-muted-foreground hover:bg-accent/55 hover:text-foreground'} ${value === 'windows' && !windowsAvailable ? 'cursor-not-allowed opacity-60' : ''}`}>
+          {icons[value]}<span className="text-center">{labelFor(value)}</span>
+          {value === 'windows' && !windowsAvailable ? <span className="text-center text-[0.625rem]">{t('explorer.connectDialog.windowsUnavailableShort')}</span> : null}
+        </button>
+      ))}</div>
+      {!windowsAvailable ? <p className="mt-2 text-xs text-muted-foreground" data-testid="connect-workspace-windows-notice">{t('explorer.connectDialog.windowsUnavailable')}</p> : null}
+    </fieldset>
+  )
 }
 
 function ChoiceGroup<T extends string>({ label, values, selected, recommended, labelFor, onChange }: { label: string; values: readonly T[]; selected: T; recommended?: T; labelFor(value: T): string; onChange(value: T): void }): JSX.Element {
@@ -411,13 +455,15 @@ function apiEndpoint(host: string | undefined, path: string): string {
   return host ? new URL(path, host).toString() : path
 }
 
-function organizationInviteCommand(host: string | undefined, inviteToken: string): string {
+function organizationInviteCommand(host: string | undefined, inviteToken: string, platform: ExecutorInstallPlatform, mode: ExecutorInstallMode): string {
   const origin = host ? new URL(host).origin : window.location.origin
   const assets = `${origin}/install/assets`
+  if (platform === 'windows') return `$env:HOST_URL=${quotePs(origin)}; $env:EXECUTOR_INVITE=${quotePs(inviteToken)}; $env:KALA_RELEASE_BASE_URL=${quotePs(assets)}; $env:KALA_RELEASE_TRUST='host'; $env:KALA_INVITE_INSTALL_MODE=${quotePs(mode)}; irm ${quotePs(`${origin}/install/invite.ps1`)} | iex`
   return `tmp=$(mktemp) && trap 'rm -f "$tmp"' EXIT && curl -fsSL ${quoteSh(`${assets}/run.sh`)} -o "$tmp" && HOST_URL=${quoteSh(origin)} EXECUTOR_INVITE=${quoteSh(inviteToken)} KALA_RELEASE_BASE_URL=${quoteSh(assets)} COMPONENT=executor bash "$tmp"`
 }
 
 function quoteSh(value: string): string { return `'${value.replace(/'/gu, `'"'"'`)}'` }
+function quotePs(value: string): string { return `'${value.replace(/'/gu, "''")}'` }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init)
@@ -430,6 +476,7 @@ function errorMessage(value: unknown): string { return value instanceof Error ? 
 function detectCurrentPlatform(): ExecutorInstallPlatform {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
   const platform = (nav.userAgentData?.platform ?? navigator.platform ?? '').toLowerCase()
+  if (platform.includes('win')) return 'windows'
   if (platform.includes('mac')) return 'macos'
   return 'linux'
 }

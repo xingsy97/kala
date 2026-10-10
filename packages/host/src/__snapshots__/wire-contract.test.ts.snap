@@ -101,6 +101,7 @@ exports[`wire contract — schema surface > exports a stable, sorted set of sche
   "ExecutorAnnounceSchema",
   "ExecutorCapabilitiesSchema",
   "ExecutorIdentitySummarySchema",
+  "ExecutorInstallCapabilitiesSchema",
   "ExecutorInstallEventSchema",
   "ExecutorInstallModeSchema",
   "ExecutorInstallPlatformSchema",

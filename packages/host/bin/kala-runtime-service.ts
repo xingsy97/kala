@@ -56,6 +56,15 @@ async function main(): Promise<void> {
   const dashboardDir = process.env.KALA_RUNTIME_HOST_DASHBOARD_DIR
   const docsDir = process.env.KALA_RUNTIME_HOST_DOCS_DIR
   const releaseAssetsDir = process.env.KALA_RUNTIME_HOST_RELEASE_ASSETS_DIR
+  // Anonymous downloads must never be bound to whichever organization happens
+  // to be active. This reserved unit exposes only shared, read-only installers.
+  const publicInstallerUnitId = 'public-installer'
+  const isPublicInstallerRequest = (request: import('node:http').IncomingMessage): boolean => {
+    const path = (request.url ?? '').split('?', 1)[0] ?? ''
+    return (request.method === 'GET' || request.method === 'HEAD')
+      && (path === '/install' || path === '/install.ps1' || path === '/install/invite.ps1'
+        || path.startsWith('/install/assets/') || path.startsWith('/release-assets/'))
+  }
   const tlsPaths = [
     process.env.KALA_RUNTIME_TLS_KEY_FILE,
     process.env.KALA_RUNTIME_TLS_CERT_FILE,
@@ -79,6 +88,7 @@ async function main(): Promise<void> {
     } : {}),
     resolveUnitId: (request) => {
       const value = request.headers['x-agent-runlab-runtime-unit']
+      if (value === publicInstallerUnitId) return releaseAssetsDir && isPublicInstallerRequest(request) ? value : undefined
       return typeof value === 'string' ? value : undefined
     },
     factory: async (id) => {
@@ -102,8 +112,7 @@ async function main(): Promise<void> {
       return startLoopbackHostRuntimeUnit(id, {
         sessionsDir: join(unitRoot, 'sessions'),
         artifactRootDir: join(unitRoot, 'artifacts'),
-        workspaceDir,
-        executorIdentityStorePath: join(unitRoot, 'executor-identities.json'),
+        ...(id === publicInstallerUnitId ? {} : { workspaceDir, executorIdentityStorePath: join(unitRoot, 'executor-identities.json') }),
         llm: runtimeProvider.llm,
         defaultConfig: agentModule.config,
         models: runtimeProvider.models,
@@ -136,6 +145,7 @@ async function main(): Promise<void> {
     },
   })
   for (const entry of catalog.list()) if (entry.desiredState === 'ready') host.markRoutable(entry.unitId)
+  if (releaseAssetsDir) host.markRoutable(publicInstallerUnitId)
   attachTenantRuntimeControlApi({ http: host.http, serviceSecret: ingressSecret, service: host, store: catalog, dataRoot, capabilities })
   process.stdout.write(`${JSON.stringify({ event: 'tenant_runtime_service_ready', port: host.port, dataRoot })}\n`)
   const shutdown = async (): Promise<void> => { await host.drain(); await host.close(); process.exit(0) }

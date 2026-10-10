@@ -58,7 +58,7 @@ export interface WindowsServiceExecutorOptions {
 }
 
 export interface ManagedWindowsInstallation {
-  installationSource: 'dashboard-native'
+  installationSource: 'dashboard-native' | 'private-cloud-invite'
   installationId: string
 }
 
@@ -291,8 +291,8 @@ export function windowsServiceLayout(options: WindowsServicePlanOptions): Window
 export function assertManagedWindowsInstallation(value: unknown): ManagedWindowsInstallation {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Refusing to uninstall an unrecognized Windows Executor installation')
   const input = value as Record<string, unknown>
-  if (input.installationSource !== 'dashboard-native' || typeof input.installationId !== 'string' || !input.installationId || input.installationId.includes('\0')) throw new Error('Refusing to uninstall an unrecognized Windows Executor installation')
-  return { installationSource: 'dashboard-native', installationId: input.installationId }
+  if ((input.installationSource !== 'dashboard-native' && input.installationSource !== 'private-cloud-invite') || typeof input.installationId !== 'string' || !input.installationId || input.installationId.includes('\0')) throw new Error('Refusing to uninstall an unrecognized Windows Executor installation')
+  return { installationSource: input.installationSource, installationId: input.installationId }
 }
 
 /**

@@ -80,8 +80,15 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
     /--internal-installer/,
   ]) assert.match(ps1, marker)
   assert.match(ps1, /Host-mediated release trust requires a valid internal installation session/)
+  assert.match(ps1, /--invite-installer/)
+  assert.match(ps1, /KALA_INVITE_INSTALL_MODE/)
+  assert.match(ps1, /\$internalSession/)
+  assert.match(ps1, /\$inviteSession/)
+  assert.match(ps1, /if \(\$hostRelease\) \{ & \$binary @args \} else \{ & \$binary --internal-installer @args \}/)
+  assert.doesNotMatch(ps1, /& \$binary --internal-installer @args\s*\n/u, 'organization invite must not execute the Host installation-session entry point')
   assert.match(ps1, /Release downloads require HTTPS except for loopback URLs/)
   assert.match(ps1, /SHA256SUMS must contain exactly one valid entry/)
+  assert.match(ps1, /redirected away from the trusted Host/)
   assert.doesNotMatch(ps1, /ALLOW_UNSIGNED|winget|kala-executor\.cjs/iu)
 })
 

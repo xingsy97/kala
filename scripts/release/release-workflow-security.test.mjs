@@ -30,6 +30,42 @@ test('gitless Private Cloud runtime context includes tracked release bootstrap i
   assert.match(dockerfile, /docs\/\.tracked-release-docs/u)
 })
 
+test('Private Cloud runtime image receives an exact-tag sealed Windows Executor capture', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
+  const dockerfile = readFileSync(join(import.meta.dirname, '../../deploy/private-cloud/images/Dockerfile.runtime-service'), 'utf8')
+  const windows = workflow.slice(workflow.indexOf('  windows-assets:'), workflow.indexOf('  runtime-image:'))
+  const runtime = workflow.slice(workflow.indexOf('  runtime-image:'), workflow.indexOf('  ingress-image:'))
+
+  assert.match(workflow, /revision: \$\{\{ steps\.release\.outputs\.revision \}\}[\s\S]*git rev-parse "\$TAG\^\{commit\}"/u)
+  assert.match(windows, /runs-on: windows-latest[\s\S]*ref: '\$\{\{ needs\.resolve\.outputs\.revision \}\}'[\s\S]*--native-target win32-x64/u)
+  assert.match(windows, /CAPTURE_REVISION: '\$\{\{ needs\.resolve\.outputs\.revision \}\}'[\s\S]*windows-capture-manifest\.json[\s\S]*schemaVersion:1/u)
+  assert.match(windows, /name: private-cloud-windows-captured-assets[\s\S]*if-no-files-found: error/u)
+  assert.match(runtime, /needs: \[resolve, windows-assets\][\s\S]*ref: '\$\{\{ needs\.resolve\.outputs\.revision \}\}'[\s\S]*git rev-parse HEAD[\s\S]*actions\/download-artifact@v5[\s\S]*private-cloud-windows-captured-assets/u)
+  assert.match(runtime, /manifest\.revision !== process\.env\.EXPECTED_REVISION[\s\S]*manifest inventory is not exact[\s\S]*artifact inventory is not closed[\s\S]*Windows capture checksum mismatch/u)
+  assert.match(runtime, /SOURCE_REVISION=\$\{\{ needs\.resolve\.outputs\.revision \}\}[\s\S]*RELEASE_TAG=\$\{\{ needs\.resolve\.outputs\.tag \}\}/u)
+  assert.doesNotMatch(runtime, /gh release|releases\/download/u)
+
+  for (const asset of ['kala-executor-win32-x64.exe', 'kala-executor-service-host-win32-x64.exe', 'node-pty-win32-x64.tar.gz']) {
+    assert.match(dockerfile, new RegExp(`cp /tmp/windows-assets/${asset.replaceAll('.', '\\.')} release/`, 'u'))
+  }
+  assert.match(dockerfile, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--finalize-only[\s\S]*pnpm run verify:release-assets/u)
+  assert.match(dockerfile, /COPY --from=build --chown=65532:65532 \/app\/release\/ \/app\/release\//u)
+})
+
+test('Private Cloud image and bundle jobs use exactly the tag revision even on manual dispatch', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
+  for (const [name, next] of [
+    ['runtime-image', 'ingress-image'], ['ingress-image', 'dashboard-image'],
+    ['dashboard-image', 'image-vulnerability-scan'], ['image-vulnerability-scan', 'operator'],
+    ['operator', 'bundle'], ['bundle', 'fresh_beta_candidate_assets'],
+  ]) {
+    const job = workflow.slice(workflow.indexOf(`  ${name}:`), workflow.indexOf(`  ${next}:`))
+    assert.match(job, /uses: actions\/checkout@v5\s+with: \{ ref: '\$\{\{ needs\.resolve\.outputs\.revision \}\}' \}/u, `${name} must checkout the tag commit`)
+    assert.doesNotMatch(job, /\$\{\{ github\.sha \}\}/u, `${name} must not label a branch HEAD as the release tag`)
+  }
+  assert.match(workflow, /--revision "\$\{\{ needs\.resolve\.outputs\.revision \}\}"/u)
+})
+
 test('Private Cloud images derive a minimal Node runtime and exclude unused OpenSSL and build tooling', () => {
   const builderDigest = 'sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c'
   const runtimeDigest = 'sha256:5ef534d3db0ac0c43bee379af4ae49cfbfc0ef38a46c94c52d87c68f32f34d8a'
@@ -129,8 +165,31 @@ test('release workflow publishes archived metadata and verifies the signed Execu
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*pnpm run verify:release-assets -- --require-signed/u)
   assert.match(workflow, /Verify exact signed Executor-native inventory[\s\S]*cosign verify-blob[\s\S]*certificate-oidc-issuer/u)
   assert.equal(workflow.match(/reconcile-github-release-assets\.mjs[^\n]+--preserve-private-cloud-assets/g)?.length, 2)
+  const nativeRelease = workflow.slice(workflow.indexOf('  native-release:'))
+  const captureValidation = nativeRelease.indexOf('Validate and stage the exact Windows-captured revision')
+  const hostEmbedding = nativeRelease.indexOf('embed-windows-assets-in-portable-host.mjs')
+  const finalize = nativeRelease.indexOf('--finalize-only')
+  const installSmoke = nativeRelease.indexOf('pnpm run verify:release-install')
+  const signing = nativeRelease.indexOf('cosign sign-blob')
+  assert.ok(captureValidation >= 0 && captureValidation < hostEmbedding)
+  assert.ok(hostEmbedding < finalize && finalize < installSmoke && installSmoke < signing)
+  assert.match(nativeRelease, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--repo \$\{\{ github\.repository \}\}[\s\S]*--tag \$\{\{ needs\.resolve\.outputs\.tag \}\}[\s\S]*--expected-revision \$\{\{ github\.sha \}\}/u)
+  assert.doesNotMatch(workflow.slice(workflow.indexOf('  cjs-release:'), workflow.indexOf('  windows-assets:')), /embed-windows-assets-in-portable-host/u)
   assert.doesNotMatch(workflow, /notes-file release\/RELEASE_NOTES\.md/u)
   assert.doesNotMatch(workflow, /release\/sbom\.cdx\.json/u)
+})
+
+test('Portable OCI beta.19 dispatch requires immutable Node and isolated-VM acceptance', () => {
+  const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/portable-image-release.yml'), 'utf8')
+  assert.match(workflow, /ACCEPTED_TAG: v0\.3\.0-beta\.19/u)
+  assert.doesNotMatch(workflow, /ACCEPTED_TAG: v0\.3\.0-beta\.18/u)
+  assert.match(workflow, /node_22_amd64_digest:\n\s+description: [^\n]*digest[^\n]*sha256:\.\.\.\)\n\s+required: true\n\s+type: string/u)
+  assert.match(workflow, /\[\[ "\$NODE_DIGEST" =~ \^sha256:\[0-9a-f\]\{64\}\$ \]\]/u)
+  assert.match(workflow, /NODE_IMAGE=node:22-bookworm-slim@\$\{\{ inputs\.node_22_amd64_digest \}\}/u)
+  assert.match(workflow, /require_isolated_vm_acceptance:\n\s+description: [^\n]+\n\s+required: true\n\s+type: boolean\n\s+default: true/u)
+  assert.equal((workflow.match(/test "\$ACCEPTANCE_REQUIRED" = true/gu) ?? []).length, 2)
+  assert.match(workflow, /test "\$ACCEPTANCE_RESULT" = success/u)
+  assert.doesNotMatch(workflow, /isolated-VM acceptance not required/u)
 })
 
 test('RC promotion binds acceptance to the tag ref exposed by the Actions API', () => {

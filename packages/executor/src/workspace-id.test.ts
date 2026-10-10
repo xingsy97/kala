@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -34,7 +34,7 @@ describe('loadOrCreateWorkspaceId', () => {
     expect(third).toBe(first)
   })
 
-  it('creates the parent directory if missing', () => {
+  it('creates the parent directory if missing, using native path separators', () => {
     const nested = join(dir, 'nested', 'sub', 'workspace-id')
     const id = loadOrCreateWorkspaceId(nested)
     expect(existsSync(nested)).toBe(true)
@@ -48,13 +48,13 @@ describe('loadOrCreateWorkspaceId', () => {
 
   it('uses an isolated workspace id path for a named profile', () => {
     const profilePath = workspaceIdPath('dev')
-    expect(profilePath).toMatch(/\.kala\/profiles\/dev\/workspace-id$/)
-    expect(executorProfileDir('dev')).toMatch(/\.kala\/profiles\/dev$/)
+    expect(profilePath).toBe(join(homedir(), '.kala', 'profiles', 'dev', 'workspace-id'))
+    expect(executorProfileDir('dev')).toBe(join(homedir(), '.kala', 'profiles', 'dev'))
   })
 
   it('keeps the default profile on the legacy workspace id path', () => {
-    expect(workspaceIdPath('default')).toMatch(/\.kala\/workspace-id$/)
-    expect(workspaceIdPath(undefined)).toMatch(/\.kala\/workspace-id$/)
+    expect(workspaceIdPath('default')).toBe(join(homedir(), '.kala', 'workspace-id'))
+    expect(workspaceIdPath(undefined)).toBe(join(homedir(), '.kala', 'workspace-id'))
   })
 
   it('rejects unsafe profile names', () => {

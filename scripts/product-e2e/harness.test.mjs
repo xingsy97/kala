@@ -136,3 +136,45 @@ test('system E2E journeys do not bypass browser hit-testing with DOM click', asy
   }
   assert.deepEqual(violations, [], `DOM-dispatched clicks bypass pointer hit-testing: ${violations.join(', ')}`)
 })
+
+test('Windows terminal E2E executes the API PowerShell command without claiming or invoking the internal installer itself', async () => {
+  const source = await readFile(new URL('verify-windows-terminal.mjs', import.meta.url), 'utf8')
+
+  assert.match(source, /'-Command', created\.command/u)
+  assert.match(source, /api\/executor-install-capabilities/u)
+  assert.doesNotMatch(source, /\/install\/session/u)
+  assert.doesNotMatch(source, /'--internal-installer'/u)
+  assert.doesNotMatch(source, /console\.error\(logs\.join/u)
+})
+
+test('release workflows hard-gate captured Windows assets with temporary and service API command lifecycles', async () => {
+  for (const workflow of ['release.yml', 'private-cloud-release.yml']) {
+    const source = await readFile(new URL(`../../.github/workflows/${workflow}`, import.meta.url), 'utf8')
+    const temporary = source.indexOf('Real Windows API created.command temporary')
+    const service = source.indexOf('Real Windows API created.command service')
+    const upload = source.indexOf('name: windows-captured-assets') >= 0
+      ? source.indexOf('name: windows-captured-assets')
+      : source.indexOf('name: private-cloud-windows-captured-assets')
+
+    assert.ok(temporary >= 0, `${workflow} is missing the Windows temporary created.command gate`)
+    assert.ok(service > temporary, `${workflow} is missing the Windows service created.command gate`)
+    assert.ok(upload > service, `${workflow} uploads Windows assets before the real-machine gates`)
+    assert.match(source, /prepare-windows-release-fixture\.mjs/u)
+    assert.doesNotMatch(source.slice(0, upload), /gh release download/u)
+  }
+})
+
+test('real Windows invite.ps1 preflight is followed by a valid Private Cloud temporary and service lifecycle before capture upload', async () => {
+  const script = await readFile(new URL('verify-windows-terminal.mjs', import.meta.url), 'utf8')
+  const workflow = await readFile(new URL('../../.github/workflows/private-cloud-release.yml', import.meta.url), 'utf8')
+  const invite = await readFile(new URL('verify-private-cloud-windows-invite.mjs', import.meta.url), 'utf8')
+
+  assert.match(script, /install\/invite\.ps1/u)
+  assert.match(script, /isolated-invalid-invite/u)
+  assert.match(script, /not a Private Cloud topology E2E/u)
+  assert.match(invite, /verifyTemporaryInvite\(\{ origin, unitId \}\)[\s\S]*verifyServiceInvite\(\{ origin, unitId \}\)/u)
+  assert.match(invite, /'install\/invite\.ps1'|\/install\/invite\.ps1/u)
+  const lifecycle = workflow.indexOf('run: node scripts/product-e2e/verify-private-cloud-windows-invite.mjs')
+  const upload = workflow.indexOf('name: private-cloud-windows-captured-assets')
+  assert.ok(lifecycle > 0 && upload > lifecycle, 'the valid Private Cloud Windows lifecycle must gate captured assets')
+})

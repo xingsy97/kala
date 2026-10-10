@@ -71,10 +71,10 @@ describe('Private Cloud edge request path', () => {
     }
   })
 
-  it('serves immutable installer assets anonymously without granting a Runtime Unit', async () => {
-    const requests: Array<{ url?: string; unit?: string }> = []
+  it('serves immutable installer assets through the public Unit without granting a tenant route', async () => {
+    const requests: Array<{ url?: string; unit?: string; secret?: string }> = []
     const upstream = createServer((request, response) => {
-      requests.push({ url: request.url, unit: request.headers['x-agent-runlab-runtime-unit'] as string | undefined })
+      requests.push({ url: request.url, unit: request.headers['x-agent-runlab-runtime-unit'] as string | undefined, secret: request.headers['x-agent-runlab-ingress-secret'] as string | undefined })
       response.writeHead(200, { 'content-type': 'text/x-shellscript' })
       response.end('#!/bin/sh\n')
     })
@@ -84,15 +84,25 @@ describe('Private Cloud edge request path', () => {
     running.push({ close: () => new Promise<void>((resolve) => upstream.close(() => resolve())) })
     const gateway = await createGateway(`http://127.0.0.1:${upstreamPort}`)
 
-    const asset = await fetch(`http://127.0.0.1:${gateway.port}/install/assets/run.sh`)
+    const asset = await fetch(`http://127.0.0.1:${gateway.port}/install/assets/run.sh`, { headers: { 'x-agent-runlab-runtime-unit': 'tenant_forged', 'x-agent-runlab-ingress-secret': 'forged' } })
     expect(asset.status).toBe(200)
     expect(await asset.text()).toBe('#!/bin/sh\n')
-    expect(requests).toEqual([{ url: '/install/assets/run.sh', unit: undefined }])
+    expect(requests).toEqual([{ url: '/install/assets/run.sh', unit: 'public-installer', secret: 'gateway-secret' }])
+    const inviteScript = await fetch(`http://127.0.0.1:${gateway.port}/install/invite.ps1`)
+    expect(inviteScript.status).toBe(200)
+    const inviteHead = await fetch(`http://127.0.0.1:${gateway.port}/install/invite.ps1`, { method: 'HEAD' })
+    expect(inviteHead.status).toBe(200)
+    expect(requests.map((request) => request.url)).toEqual(['/install/assets/run.sh', '/install/invite.ps1', '/install/invite.ps1'])
+    expect(requests.every((request) => request.unit === 'public-installer' && request.secret === 'gateway-secret')).toBe(true)
+    const inviteWrite = await fetch(`http://127.0.0.1:${gateway.port}/install/invite.ps1`, { method: 'POST' })
+    expect(inviteWrite.status).toBe(405)
+    expect(inviteWrite.headers.get('allow')).toBe('GET, HEAD')
+    expect((await fetch(`http://127.0.0.1:${gateway.port}/install/invite.ps1?invite=forbidden`)).status).toBe(400)
     const assetWrite = await fetch(`http://127.0.0.1:${gateway.port}/install/assets/run.sh`, { method: 'POST' })
     expect(assetWrite.status).toBe(401)
     const session = await fetch(`http://127.0.0.1:${gateway.port}/install/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
     expect(session.status).toBe(401)
-    expect(requests).toHaveLength(1)
+    expect(requests).toHaveLength(3)
   })
 
   it('binds administrator-created Executor invites to one organization and rejects anonymous, member, and cross-origin creation', async () => {

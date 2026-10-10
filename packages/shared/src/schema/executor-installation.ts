@@ -6,6 +6,7 @@ import {
 } from '../executor-installation.js'
 import type {
   CreateExecutorInstall,
+  ExecutorInstallCapabilities,
   ExecutorInstallEvent,
   ExecutorInstallMode,
   ExecutorInstallPlatform,
@@ -36,6 +37,14 @@ export const ExecutorPrivilegeModeSchema = z.enum([
   'restricted',
   'privileged',
 ]) satisfies z.ZodType<ExecutorPrivilegeMode>
+
+export const ExecutorInstallCapabilitiesSchema = z.object({
+  platforms: z.object({
+    linux: z.object({ available: z.boolean() }).strict(),
+    macos: z.object({ available: z.boolean() }).strict(),
+    windows: z.object({ available: z.boolean() }).strict(),
+  }).strict(),
+}).strict() satisfies z.ZodType<ExecutorInstallCapabilities>
 
 export const ExecutorInstallStatusSchema = z.enum([
   'created',

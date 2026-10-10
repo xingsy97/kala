@@ -37,6 +37,36 @@ describe('executor installation routes', () => {
     expect(response.headers.get('access-control-allow-origin')).toBeNull()
     expect(response.headers.get('access-control-allow-methods')).toContain('POST')
     expect(response.headers.get('access-control-allow-headers')).toContain('content-type')
+
+    const capabilities = await fetch(`${url}/api/executor-install-capabilities`, {
+      headers: { origin: 'https://untrusted.example.test' },
+    })
+    expect(capabilities.status).toBe(200)
+    expect(capabilities.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  it('reports authenticated, side-effect-free platform readiness from the Host asset check', async () => {
+    const unavailable = await start('single-tenant', false)
+    const createSpy = vi.spyOn(unavailable.store, 'create')
+    const unavailableResponse = await fetch(`${unavailable.url}/api/executor-install-capabilities`)
+    expect(unavailableResponse.status).toBe(200)
+    await expect(unavailableResponse.json()).resolves.toEqual({
+      platforms: {
+        linux: { available: true },
+        macos: { available: true },
+        windows: { available: false },
+      },
+    })
+    expect(createSpy).not.toHaveBeenCalled()
+
+    const available = await start('single-tenant', true)
+    await expect(fetch(`${available.url}/api/executor-install-capabilities`).then((response) => response.json())).resolves.toEqual({
+      platforms: {
+        linux: { available: true },
+        macos: { available: true },
+        windows: { available: true },
+      },
+    })
   })
 
   it('supports Linux and macOS installs but rejects Windows when trusted release assets are unavailable', async () => {
@@ -63,6 +93,7 @@ describe('executor installation routes', () => {
     const installer = await fetch(`${url}/install.ps1`)
     expect(installer.status).toBe(410)
     expect(await installer.json()).toEqual({ error: 'windows_release_assets_unavailable' })
+    expect((await fetch(`${url}/install/invite.ps1`)).status).toBe(410)
   })
 
   it('creates Windows sessions and serves a native-only PowerShell bootstrap when trusted assets are ready', async () => {
@@ -82,7 +113,25 @@ describe('executor installation routes', () => {
     const script = await installer.text()
     expect(script).toContain('/install/assets/install-executor.ps1')
     expect(script.indexOf('/install/assets/install-executor.ps1')).toBeLessThan(script.indexOf('/install/session'))
+    expect(script).toContain('& $installer --internal-installer')
+    expect(script).not.toMatch(/& \$installer\r?\n/u)
     expect(script).not.toMatch(/winget|KALA_INSTALL_NODE|kala-executor\.cjs/iu)
+
+    const inviteInstaller = await fetch(`${url}/install/invite.ps1`)
+    expect(inviteInstaller.status).toBe(200)
+    const inviteScript = await inviteInstaller.text()
+    expect(inviteScript).toContain(`$expectedHost = '${url}'`)
+    expect(inviteScript).toContain(`$expectedAssets = '${url}/install/assets'`)
+    expect(inviteScript).toContain('& $installer --invite-installer')
+    expect(inviteScript).toContain('Windows service installation requires an elevated Administrator PowerShell')
+    expect(inviteScript).not.toMatch(/[?&](?:invite|token)=/u)
+    const head = await fetch(`${url}/install/invite.ps1`, { method: 'HEAD' })
+    expect(head.status).toBe(200)
+    expect(await head.text()).toBe('')
+    const rejected = await fetch(`${url}/install/invite.ps1`, { method: 'POST' })
+    expect(rejected.status).toBe(405)
+    expect(rejected.headers.get('allow')).toBe('GET, HEAD')
+    expect((await fetch(`${url}/install/invite.ps1?invite=forbidden`)).status).toBe(400)
   })
 
   it('rejects invalid input but never exposes server filesystem paths after a persistence fault', async () => {
@@ -163,6 +212,17 @@ describe('executor installation routes', () => {
     const dedicated = await start('single-tenant')
     expect((await fetch(`${dedicated.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' }) })).status).toBe(201)
     const privateCloud = await start('multi-tenant')
+    const capabilityPath = `${privateCloud.url}/api/executor-install-capabilities`
+    const anonymousCapabilities = await fetch(capabilityPath)
+    expect(anonymousCapabilities.status).toBe(403)
+    await expect(anonymousCapabilities.json()).resolves.toEqual({ error: 'admin_required' })
+    const memberHeaders = { 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'member' }
+    expect((await fetch(capabilityPath, { headers: memberHeaders })).status).toBe(403)
+    const adminHeaders = { 'x-agent-runlab-principal': 'p', 'x-agent-runlab-organization-id': 'o', 'x-agent-runlab-organization-role': 'admin' }
+    const adminCapabilities = await fetch(capabilityPath, { headers: adminHeaders })
+    expect(adminCapabilities.status).toBe(200)
+    await expect(adminCapabilities.json()).resolves.toMatchObject({ platforms: { windows: { available: false } } })
+
     const body = JSON.stringify({ platform: 'linux', mode: 'service', privilegeMode: 'privileged', workspaceRoot: '/work' })
     const anonymous = await fetch(`${privateCloud.url}/api/executor-installs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
     expect(anonymous.status).toBe(403)

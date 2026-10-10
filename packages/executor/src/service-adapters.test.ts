@@ -288,6 +288,7 @@ describe('Windows service adapter', () => {
 
   it('binds uninstall to a recognized installation identity', () => {
     expect(assertManagedWindowsInstallation({ installationSource: 'dashboard-native', installationId: 'install-1' }).installationId).toBe('install-1')
+    expect(assertManagedWindowsInstallation({ installationSource: 'private-cloud-invite', installationId: 'invite-route' }).installationSource).toBe('private-cloud-invite')
     expect(() => assertManagedWindowsInstallation({ installationSource: 'manual', installationId: 'install-1' })).toThrow('Refusing')
     expect(() => assertManagedWindowsInstallation({ installationSource: 'dashboard-native', installationId: '' })).toThrow('Refusing')
   })

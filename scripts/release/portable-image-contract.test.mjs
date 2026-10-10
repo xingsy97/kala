@@ -77,7 +77,7 @@ test('isolated Docker acceptance matches the Portable Host public-origin gate wi
 test('portable candidate workflow binds the manual dispatch to signed tag assets and full revision', () => {
   const workflow = readFileSync(join(root, '.github/workflows/portable-image-release.yml'), 'utf8')
   assert.match(workflow, /workflow_dispatch:/u)
-  assert.match(workflow, /ACCEPTED_TAG: v0\.3\.0-beta\.18/u)
+  assert.match(workflow, /ACCEPTED_TAG: v0\.3\.0-beta\.19/u)
   assert.match(workflow, /test "\$TAG" = "\$ACCEPTED_TAG"/u)
   assert.match(workflow, /test "\$GITHUB_REF" = "refs\/tags\/\$TAG"/u)
   assert.match(workflow, /GITHUB_WORKFLOW_REF" = "\$GITHUB_REPOSITORY\/\.github\/workflows\/portable-image-release\.yml@refs\/tags\/\$TAG"/u)
@@ -119,8 +119,9 @@ test('isolated VM acceptance is explicit, fail-closed when required, and never r
   assert.match(workflow, /KALA_PORTABLE_CONTAINER_ACCEPTANCE_VM: '1'/u)
   assert.match(workflow, /--isolated-vm/u)
   assert.match(workflow, /ACCEPTANCE_REQUIRED/u)
+  assert.match(workflow, /test "\$ACCEPTANCE_REQUIRED" = true/u)
   assert.match(workflow, /test "\$ACCEPTANCE_RESULT" = success/u)
-  assert.match(workflow, /public promotion is prohibited/u)
+  assert.match(workflow, /this workflow still does not make the package public/u)
   assert.doesNotMatch(workflow, /product-system-e2e|private-cloud-product-e2e|ci:product-e2e|runs-on:.*box/iu)
 })
 

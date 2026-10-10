@@ -13,7 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { ulid } from 'ulid'
 
@@ -65,8 +65,7 @@ export function loadOrCreateWorkspaceId(pathOverride?: string, profile?: string)
     return raw
   }
   const id = ulid()
-  const dir = path.slice(0, path.lastIndexOf('/'))
-  if (dir.length > 0) mkdirSync(dir, { recursive: true })
+  mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, id + '\n', { encoding: 'utf8', mode: 0o600 })
   return id
 }

@@ -24,6 +24,7 @@ const sessionId = 'windows-terminal-e2e'
 const marker = `KALA_CONPTY_${Date.now()}`
 const logs = []
 const serviceMode = process.env.PRODUCT_E2E_WINDOWS_SERVICE === '1'
+const invitePreflight = process.env.PRODUCT_E2E_WINDOWS_INVITE_PREFLIGHT === '1'
 let host
 let executorProcess
 let dashboard
@@ -54,10 +55,11 @@ try {
       serviceOwned = true
     }
     await verifyExecutorLifecycle()
+    if (invitePreflight && !serviceMode) await verifyInviteBootstrapSecurityBoundary()
   }
 } catch (error) {
   console.error(error)
-  console.error(logs.join(''))
+  console.error(`Captured child-process diagnostics: ${summarizeLogs(logs.join(''))}`)
   process.exitCode = 1
 } finally {
   dashboard?.close()
@@ -85,6 +87,11 @@ async function verifyExecutorLifecycle() {
     join(executorRelease, 'shared', 'conout.js'),
   ], 'Windows native Executor and complete node-pty companion')
 
+  const capabilitiesResponse = await fetch(`${origin}/api/executor-install-capabilities`)
+  if (!capabilitiesResponse.ok) throw new Error(`Windows install capabilities failed: ${capabilitiesResponse.status}`)
+  const capabilities = await capabilitiesResponse.json()
+  if (capabilities?.platforms?.windows?.available !== true) throw new Error('Windows Host did not recognize the complete checksum-verified local installer payload')
+
   const createResponse = await fetch(`${origin}/api/executor-installs`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ platform: 'windows', mode: serviceMode ? 'service' : 'temporary', privilegeMode: 'privileged', workspaceRoot: stateRoot, label: 'windows-terminal-e2e' }),
@@ -97,13 +104,9 @@ async function verifyExecutorLifecycle() {
     throw new Error(`create Windows install failed: ${createResponse.status} ${detail}`)
   }
   const created = await createResponse.json()
-  const claimResponse = await fetch(`${origin}/install/session`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ setupCode: created.setupCode }),
-  })
-  if (!claimResponse.ok) throw new Error(`claim failed: ${claimResponse.status}`)
-  const claim = await claimResponse.json()
-  executorProcess = start(executor, ['--internal-installer'], {
-    ...claim.env, EXECUTOR_INSTALL_ROOT: stateRoot, HOME: stateRoot, USERPROFILE: stateRoot,
+  if (typeof created.command !== 'string' || created.command.length === 0) throw new Error('create Windows install did not return a PowerShell command')
+  executorProcess = start('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', created.command], {
+    HOME: stateRoot, USERPROFILE: stateRoot,
     KALA_TERMINAL_DIAGNOSTICS: '1',
   })
   const completedDeadline = Date.now() + 30_000
@@ -186,7 +189,7 @@ async function verifyExecutorLifecycle() {
   if (!output.join('').includes(`${ptyProbe}False`)) throw new Error('Windows Terminal used redirected pipes instead of ConPTY')
   const killed = await emitAck(dashboard, 'terminal:kill', { requestId: `kill-${Date.now()}`, workspaceId, sessionId, terminalId: createdTerminal.terminalId })
   if (!killed.killed) throw new Error(`terminal kill failed: ${killed.error ?? 'unknown'}`)
-  if (logs.join('').includes('Failed to load native module: conpty.node')) throw new Error(`ConPTY native load failed:\n${logs.join('')}`)
+  if (logs.join('').includes('Failed to load native module: conpty.node')) throw new Error(`ConPTY native load failed; diagnostics=${summarizeLogs(logs.join(''))}`)
 
   if (serviceMode) {
     const installDir = join(process.env.ProgramFiles, 'Kala', 'Executor')
@@ -221,6 +224,23 @@ async function verifyExecutorLifecycle() {
   console.log(`PASS Windows native Executor ${serviceMode ? 'service' : 'temporary'} ConPTY create/input/resize/kill lifecycle`)
 }
 
+async function verifyInviteBootstrapSecurityBoundary() {
+  const result = await run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `irm '${origin}/install/invite.ps1' | iex`], {
+    env: {
+      HOST_URL: origin,
+      KALA_RELEASE_BASE_URL: `${origin}/install/assets`,
+      KALA_RELEASE_TRUST: 'host',
+      EXECUTOR_INVITE: 'isolated-invalid-invite',
+      KALA_INVITE_INSTALL_MODE: 'temporary',
+    },
+  })
+  const output = `${result.stdout}\n${result.stderr}`
+  if (result.code === 0 || !output.includes('A valid Executor invite is required')) {
+    throw new Error(`Private Cloud invite.ps1 security preflight did not reach the expected fake-invite rejection (code=${result.code}; stdoutBytes=${Buffer.byteLength(result.stdout)}; stderrBytes=${Buffer.byteLength(result.stderr)})`)
+  }
+  console.log('PASS real Windows invite.ps1 bootstrap rejected an isolated invalid invite at the credential boundary (not a Private Cloud topology E2E)')
+}
+
 function assertFiles(paths, label) {
   const missing = paths.filter((path) => !existsSync(path))
   if (missing.length > 0) throw new Error(`${label} is incomplete; missing: ${missing.join(', ')}`)
@@ -237,10 +257,12 @@ function stop(child) {
   return new Promise((resolvePromise) => {
     const timer = setTimeout(resolvePromise, 5_000)
     child.once('exit', () => { clearTimeout(timer); resolvePromise() })
-    child.kill()
+    if (process.platform === 'win32') spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' })
+    else child.kill()
   })
 }
-function run(file, args) { return new Promise((resolvePromise, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolvePromise({ code, stdout, stderr, pid: child.pid })) }) }
+function run(file, args, options = {}) { return new Promise((resolvePromise, reject) => { const child = spawn(file, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...options, env: { ...process.env, ...options.env } }); let stdout = '', stderr = ''; child.stdout.on('data', (chunk) => { stdout += chunk }); child.stderr.on('data', (chunk) => { stderr += chunk }); child.once('error', reject); child.once('exit', (code) => resolvePromise({ code, stdout, stderr, pid: child.pid })) }) }
+function summarizeLogs(value) { return JSON.stringify({ bytes: Buffer.byteLength(value), accessDenied: /access denied|UnauthorizedAccessException/iu.test(value), missingFile: /cannot find|not found|FileNotFoundException/iu.test(value), configError: /Invalid Executor config|Invalid Executor credential/iu.test(value), identityRejected: /workspace_identity_mismatch|auth_failed|workspace_id_conflict/iu.test(value), nativeLoadFailure: /Failed to load native module/iu.test(value) }) }
 async function waitForHttp(url) { const deadline = Date.now() + 30_000; while (Date.now() < deadline) { try { if ((await fetch(url)).ok) return } catch {} if (host?.exitCode !== null) throw new Error(`Host exited before becoming available (${host.exitCode})`); await sleep(100) } throw new Error(`Host unavailable: ${url}`) }
 function sleep(ms) { return new Promise((resolvePromise) => setTimeout(resolvePromise, ms)) }
 function once(socket, event) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), 15_000); socket.once(event, (payload) => { clearTimeout(timer); resolvePromise(payload) }) }) }

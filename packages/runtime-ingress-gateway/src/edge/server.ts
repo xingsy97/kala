@@ -33,7 +33,7 @@ function isDocumentNavigation(request: IncomingMessage): boolean {
 }
 
 function isPublicInstallerPath(pathname: string): boolean {
-  return pathname === '/install' || pathname === '/install.ps1' || pathname.startsWith('/install/assets/') || pathname.startsWith('/release-assets/')
+  return pathname === '/install' || pathname === '/install.ps1' || pathname === '/install/invite.ps1' || pathname.startsWith('/install/assets/') || pathname.startsWith('/release-assets/')
 }
 
 const DASHBOARD_API_EXACT = new Set(['/models', '/settings', '/memo', '/metrics', '/organization', '/install', '/install.ps1'])
@@ -188,7 +188,21 @@ export async function startRuntimeIngressGateway(options: {
   }
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = new URL(request.url ?? '/', options.publicOrigin)
+    if (url.pathname === '/install/invite.ps1' && url.search) {
+      response.writeHead(400, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: 'query_not_allowed' }))
+      return
+    }
+    if (url.pathname === '/install/invite.ps1' && request.method !== 'GET' && request.method !== 'HEAD') {
+      response.writeHead(405, { allow: 'GET, HEAD', 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ error: 'method_not_allowed' }))
+      return
+    }
     if (isPublicInstallerPath(url.pathname) && (request.method === 'GET' || request.method === 'HEAD')) {
+      // Anonymous installation assets are shared release bytes, never a tenant
+      // route. Replace untrusted client headers before contacting the Runtime.
+      request.headers['x-agent-runlab-runtime-unit'] = 'public-installer'
+      request.headers['x-agent-runlab-ingress-secret'] = options.ingressSecret
       request.headers['x-forwarded-proto'] = publicUrl.protocol.slice(0, -1)
       request.headers['x-forwarded-host'] = publicUrl.host
       proxy.web(request, response, { target: options.hostOrigin }, () => {

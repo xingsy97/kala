@@ -99,13 +99,19 @@ $maxMetadataBytes = if ($env:KALA_INSTALLER_MAX_METADATA_BYTES) { [int64]$env:KA
 $uri = [Uri]$baseUrl
 $isLoopback = $uri.IsLoopback -and $uri.Scheme -eq 'http'
 $publicRelease = $uri.Scheme -eq 'https'
+$hostRelease = $false
 if (-not $publicRelease -and -not $isLoopback -and $env:KALA_RELEASE_TRUST -ne 'host') { throw 'Release downloads require HTTPS except for loopback URLs' }
 if ($env:KALA_RELEASE_TRUST -eq 'host') {
   $hostAssetBase = if ($env:HOST_URL) { $env:HOST_URL.TrimEnd('/') + '/install/assets' } else { '' }
-  if ($args.Count -eq 0 -or $args[0] -ne '--internal-installer' -or -not $env:EXECUTOR_INSTALL_ID -or -not $env:EXECUTOR_INSTALL_BOOTSTRAP -or -not $hostAssetBase -or $baseUrl -ne $hostAssetBase) {
+  $internalSession = $args.Count -eq 1 -and $args[0] -eq '--internal-installer' -and $env:EXECUTOR_INSTALL_ID -and $env:EXECUTOR_INSTALL_BOOTSTRAP
+  $inviteSession = $args.Count -eq 1 -and $args[0] -eq '--invite-installer' -and $env:EXECUTOR_INVITE -match '^ak_invite_[A-Za-z0-9_-]+$' -and @('temporary', 'service') -contains $env:KALA_INVITE_INSTALL_MODE
+  if ((-not $internalSession -and -not $inviteSession) -or -not $hostAssetBase -or $baseUrl -ne $hostAssetBase) {
     throw 'Host-mediated release trust requires a valid internal installation session'
   }
+  $hostUri = [Uri]$env:HOST_URL
+  if ($hostUri.UserInfo -or $hostUri.Query -or $hostUri.Fragment -or ($hostUri.Scheme -ne 'https' -and -not ($hostUri.Scheme -eq 'http' -and $hostUri.IsLoopback))) { throw 'Host-mediated release trust requires a secure Host URL' }
   $publicRelease = $false
+  $hostRelease = $true
 }
 if (-not [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::Windows)) { throw 'This installer requires Windows' }
 if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne [Runtime.InteropServices.Architecture]::X64) { throw 'This installer requires Windows x64' }
@@ -119,6 +125,7 @@ function Download-ReleaseAsset([string]$name) {
   $response = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$name" -OutFile $destination -PassThru
   $finalUri = if ($response.BaseResponse.ResponseUri) { $response.BaseResponse.ResponseUri } elseif ($response.BaseResponse.RequestMessage) { $response.BaseResponse.RequestMessage.RequestUri } else { [Uri]"$baseUrl/$name" }
   if ($publicRelease -and $finalUri.Scheme -ne 'https') { throw "Release asset $name redirected away from HTTPS" }
+  if ($hostRelease -and $finalUri.AbsoluteUri -cne "$baseUrl/$name") { throw "Release asset $name redirected away from the trusted Host" }
   return $destination
 }
 function Read-ExpectedDigest([string]$name, [string[]]$sums) {
@@ -178,7 +185,7 @@ try {
   $prebuilds = Join-Path $work 'prebuilds'
   New-Item -ItemType Directory -Path $prebuilds -Force | Out-Null
   Move-Item (Join-Path $work 'win32-x64') (Join-Path $prebuilds 'win32-x64') -Force
-  & $binary --internal-installer @args
+  if ($hostRelease) { & $binary @args } else { & $binary --internal-installer @args }
   if ($LASTEXITCODE -ne 0) { throw "Executor installer exited with code $LASTEXITCODE" }
 } finally {
   if (-not $env:KALA_INSTALLER_WORK_DIR) { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }

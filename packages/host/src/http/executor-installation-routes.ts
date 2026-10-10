@@ -23,6 +23,18 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
     if (res.headersSent || res.writableEnded) return
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
+    if (path === '/install/invite.ps1') {
+      claimRoute(req)
+      if (url.search) { sendError(res, 400, 'query_not_allowed'); return }
+      if (req.method !== 'GET' && req.method !== 'HEAD') { res.setHeader('allow', 'GET, HEAD'); sendError(res, 405, 'method_not_allowed'); return }
+      if (!options.windowsReleaseAssetsReady?.()) { sendError(res, 410, 'windows_release_assets_unavailable'); return }
+      const origin = requestOrigin(req)
+      if (!isSecureInstallRequest(req, origin)) { sendError(res, 400, 'https_required'); return }
+      const body = renderInvitePowerShellBootstrap(origin)
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+      res.end(req.method === 'HEAD' ? undefined : body)
+      return
+    }
     if ((path === '/install' || path === '/install.ps1') && req.method === 'GET') {
       claimRoute(req)
       const shell = path === '/install'
@@ -32,6 +44,28 @@ export function attachExecutorInstallationRoutes(server: HttpServer, options: {
       const body = shell ? renderShellBootstrap(origin) : renderPowerShellBootstrap(origin)
       res.writeHead(200, { 'content-type': shell ? 'text/x-shellscript; charset=utf-8' : 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
       res.end(body)
+      return
+    }
+
+    if (path === '/api/executor-install-capabilities') {
+      claimRoute(req)
+      applyCors(req, res)
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204)
+        res.end()
+        return
+      }
+      if (req.method !== 'GET') { sendError(res, 405, 'method_not_allowed'); return }
+      const authorization = authorizeManagement(req, options.tenancy, options.auth)
+      if (!authorization.ok) { sendError(res, authorization.status, authorization.error); return }
+      const capabilities = {
+        platforms: {
+          linux: { available: true },
+          macos: { available: true },
+          windows: { available: options.windowsReleaseAssetsReady?.() === true },
+        },
+      }
+      sendJson(res, 200, capabilities)
       return
     }
 
@@ -254,10 +288,40 @@ try {
   if ($null -eq $properties -or $properties.Count -eq 0) { throw 'Kala Host returned an empty installation environment' }
   $properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, 'Process') }
   Write-Host '[3/4] Starting Executor...'
-  & $installer
+  & $installer --internal-installer
   if ($LASTEXITCODE -ne 0) { throw "Kala Executor installer exited with code $LASTEXITCODE" }
 } finally {
   Remove-Item $installer -Force -ErrorAction SilentlyContinue
+}
+`
+}
+function renderInvitePowerShellBootstrap(origin: string): string {
+  const expectedAssets = `${origin}/install/assets`
+  return `$ErrorActionPreference = 'Stop'
+$expectedHost = ${quotePs(origin)}
+$expectedAssets = ${quotePs(expectedAssets)}
+$hostUrl = if ($env:HOST_URL) { $env:HOST_URL.TrimEnd('/') } else { '' }
+$assetBase = if ($env:KALA_RELEASE_BASE_URL) { $env:KALA_RELEASE_BASE_URL.TrimEnd('/') } else { '' }
+if ($hostUrl -cne $expectedHost -or $assetBase -cne $expectedAssets -or $env:KALA_RELEASE_TRUST -ne 'host') { throw 'Invite installer URLs must match the trusted ingress origin' }
+$hostUri = [Uri]$hostUrl
+if ($hostUri.UserInfo -or $hostUri.Query -or $hostUri.Fragment -or ($hostUri.Scheme -ne 'https' -and -not ($hostUri.Scheme -eq 'http' -and $hostUri.IsLoopback))) { throw 'Invite installation requires HTTPS' }
+if ($env:EXECUTOR_INVITE -notmatch '^ak_invite_[A-Za-z0-9_-]+$') { throw 'A valid Executor invite is required' }
+if (@('temporary', 'service') -notcontains $env:KALA_INVITE_INSTALL_MODE) { throw 'KALA_INVITE_INSTALL_MODE must be temporary or service' }
+if ($env:KALA_INVITE_INSTALL_MODE -eq 'service') {
+  $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Windows service installation requires an elevated Administrator PowerShell' }
+}
+$installer = Join-Path ([IO.Path]::GetTempPath()) ('kala-invite-bootstrap-' + [guid]::NewGuid() + '.ps1')
+try {
+  $installerUri = $expectedAssets + '/install-executor.ps1'
+  $response = Invoke-WebRequest -UseBasicParsing -Uri $installerUri -OutFile $installer -PassThru
+  $finalUri = if ($response.BaseResponse.ResponseUri) { $response.BaseResponse.ResponseUri } elseif ($response.BaseResponse.RequestMessage) { $response.BaseResponse.RequestMessage.RequestUri } else { [Uri]$installerUri }
+  if ($finalUri.AbsoluteUri -cne $installerUri) { throw 'Installer redirect left the trusted ingress asset URL' }
+  & $installer --invite-installer
+  if ($LASTEXITCODE -ne 0) { throw "Kala Executor installer exited with code $LASTEXITCODE" }
+} finally {
+  Remove-Item $installer -Force -ErrorAction SilentlyContinue
+  Remove-Item Env:EXECUTOR_INVITE -ErrorAction SilentlyContinue
 }
 `
 }

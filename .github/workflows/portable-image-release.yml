@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Exact signed draft release tag (only v0.3.0-beta.18 is accepted)
+        description: Exact signed draft release tag (only v0.3.0-beta.19 is accepted)
         required: true
         type: string
       revision:
@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ACCEPTED_TAG: v0.3.0-beta.18
+  ACCEPTED_TAG: v0.3.0-beta.19
   IMAGE_NAME: ghcr.io/${{ github.repository }}-portable
 
 jobs:
@@ -56,9 +56,11 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           REVISION: ${{ inputs.revision }}
+          ACCEPTANCE_REQUIRED: ${{ inputs.require_isolated_vm_acceptance }}
         run: |
           set -euo pipefail
           test "$TAG" = "$ACCEPTED_TAG"
+          test "$ACCEPTANCE_REQUIRED" = true
           test "$GITHUB_REF" = "refs/tags/$TAG" || { echo 'Select the exact candidate tag as the workflow dispatch ref' >&2; exit 1; }
           [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
           node scripts/release/version-policy.mjs --tag "$TAG"
@@ -400,9 +402,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$BUILD_RESULT" = success
-          if [[ "$ACCEPTANCE_REQUIRED" = true ]]; then
-            test "$ACCEPTANCE_RESULT" = success
-            echo "Private candidate controls and isolated-VM acceptance passed; this workflow still does not make the package public."
-          else
-            echo "::warning::Private candidate controls passed with isolated-VM acceptance not required. Acceptance remains pending; public promotion is prohibited."
-          fi
+          test "$ACCEPTANCE_REQUIRED" = true
+          test "$ACCEPTANCE_RESULT" = success
+          echo "Private candidate controls and isolated-VM acceptance passed; this workflow still does not make the package public."

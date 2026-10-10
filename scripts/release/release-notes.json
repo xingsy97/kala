@@ -1,4 +1,20 @@
 {
+  "v0.3.0-beta.19": {
+    "previousTag": "v0.3.0-beta.18",
+    "improvements": [
+      "Dashboard workspace and Session explorers use clearer hierarchy, spacing, weights, and status treatments while retaining compact information density."
+    ],
+    "fixes": [
+      "Dashboard explorer rows now reserve touch action space and scale phone row heights with their typography, preventing labels and controls from clipping.",
+      "Private Cloud candidate gating now requires fresh-install acceptance from the exact signed draft bundle with the native JavaScript Operator before promotion evidence can be accepted."
+    ],
+    "knownIssues": [
+      "This is a beta: Windows x64 Portable Host and Executor dual-deployment work is still being validated and is not certified by this release note.",
+      "A previous Portable OCI isolated-VM attempt failed during the Socket.IO handshake with HTTP 403; exact-tag isolated-VM acceptance must be rerun successfully before candidate promotion.",
+      "Private Cloud and Portable OCI still require exact-tag acceptance evidence, immutable image digests, and the remaining release gates before public promotion."
+    ],
+    "desktopViaDashboard": true
+  },
   "v0.3.0-beta.18": {
     "previousTag": "v0.2.0",
     "improvements": [

@@ -5,6 +5,10 @@ export type ExecutorInstallPlatform = 'linux' | 'macos' | 'windows'
 export type ExecutorInstallMode = 'service' | 'temporary'
 export type ExecutorPrivilegeMode = 'restricted' | 'privileged'
 
+export interface ExecutorInstallCapabilities {
+  platforms: Record<ExecutorInstallPlatform, { available: boolean }>
+}
+
 export type ExecutorInstallStatus =
   | 'created'
   | 'bootstrap_downloaded'

@@ -24,6 +24,14 @@ for (const { pkg } of workspacePackages) {
   }
 }
 
+const tauriRoot = join(root, 'packages/desktop/src-tauri')
+const tauriConfigVersion = JSON.parse(readFileSync(join(tauriRoot, 'tauri.conf.json'), 'utf8')).version
+const cargoVersion = readFileSync(join(tauriRoot, 'Cargo.toml'), 'utf8').match(/^version\s*=\s*"([^"]+)"/mu)?.[1]
+const lockVersion = readFileSync(join(tauriRoot, 'Cargo.lock'), 'utf8').match(/^\[\[package\]\]\s*\nname\s*=\s*"kala-desktop"\s*\nversion\s*=\s*"([^"]+)"/mu)?.[1]
+for (const [name, version] of [['tauri.conf.json', tauriConfigVersion], ['Cargo.toml', cargoVersion], ['Cargo.lock kala-desktop', lockVersion]]) {
+  if (version !== expected) failures.push(`Desktop ${name} is ${version ?? 'missing'}, expected ${expected}`)
+}
+
 const manifestPath = option('--manifest')
 if (manifestPath) {
   const manifest = JSON.parse(readFileSync(resolve(manifestPath), 'utf8'))

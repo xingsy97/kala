@@ -25,6 +25,23 @@ const snapshot = {
 } as const
 
 describe('executor installation contracts', () => {
+  it('defines a strict platform readiness response', () => {
+    const capabilities = {
+      platforms: {
+        linux: { available: true },
+        macos: { available: true },
+        windows: { available: false },
+      },
+    }
+    expect(schema.ExecutorInstallCapabilitiesSchema.safeParse(capabilities).success).toBe(true)
+    expect(schema.ExecutorInstallCapabilitiesSchema.safeParse({
+      platforms: { ...capabilities.platforms, windows: { available: false, reason: 'private' } },
+    }).success).toBe(false)
+    expect(schema.ExecutorInstallCapabilitiesSchema.safeParse({
+      platforms: { linux: { available: true }, windows: { available: false } },
+    }).success).toBe(false)
+  })
+
   it('accepts strict create and update requests at their length boundaries', () => {
     expect(schema.CreateExecutorInstallSchema.safeParse({
       platform: 'windows',

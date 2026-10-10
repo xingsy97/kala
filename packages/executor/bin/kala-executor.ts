@@ -53,7 +53,7 @@ import { createLinuxServicePlan, executeLinuxServicePlan, linuxServicePaths, typ
 import { assertManagedWindowsInstallation, copyWindowsNodePtyRuntime, copyWindowsServiceHost, createWindowsSelfRemovalPlan, createWindowsServicePlan, deleteWindowsSelfRemovalTask, encodeWindowsTaskXml, executeWindowsServicePlan, registerWindowsSelfRemovalTask, renderWindowsServiceConfig, secureWindowsServiceDataDir, waitForWindowsServiceStopped, type WindowsServiceAction } from '../src/windows-service.js'
 import type { ServiceAction, ServiceMode } from '../src/cli-args.js'
 import type { InstallerSession } from '../src/installer-session.js'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 import { parseMcpServerDeclaration, parseMcpServers, type McpServerConfig } from '../src/mcp-config.js'
 
@@ -314,7 +314,45 @@ async function runInternalInstaller(): Promise<void> {
   printServiceCommands(installerSession.mode, executable)
 }
 
-async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment>, workspaceRoot: string, token: string, workspaceId: string): Promise<void> {
+async function runInviteInstaller(): Promise<void> {
+  if (process.platform !== 'win32') throw new Error('Invite installation is available on Windows only')
+  const host = process.env.HOST_URL?.replace(/\/$/u, '')
+  const invite = process.env.EXECUTOR_INVITE
+  const mode = process.env.KALA_INVITE_INSTALL_MODE
+  if (!host || !invite || !/^ak_invite_[A-Za-z0-9_-]+$/u.test(invite) || (mode !== 'temporary' && mode !== 'service')) throw new Error('Invalid invite installation environment')
+  const hostUrl = new URL(host)
+  if (hostUrl.username || hostUrl.password || hostUrl.search || hostUrl.hash || (hostUrl.protocol !== 'https:' && !(hostUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(hostUrl.hostname)))) throw new Error('Invite installation requires a secure Host URL')
+  const workspaceRoot = resolve(process.cwd())
+  if (mode === 'temporary') {
+    await main(['--host', host, '--sandbox-root', workspaceRoot])
+    return
+  }
+  if (basename(process.execPath).toLowerCase() === 'node.exe') throw new Error('Windows service mode requires the native kala-executor asset')
+  const integrity = spawnSync('whoami.exe', ['/groups', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true })
+  if (integrity.status !== 0 || !/S-1-16-(?:12288|16384)/u.test(integrity.stdout)) throw new Error('Windows service installation requires an elevated Administrator process')
+  const workspaceId = loadOrCreateWorkspaceId()
+  const routeHint = hashExecutorInviteRoute(invite)
+  let acceptToken!: (token: string) => void
+  const enrolledToken = new Promise<string>((resolveToken) => { acceptToken = resolveToken })
+  const handle = startExecutor({ host, workspaceId, sandboxRoots: [workspaceRoot], invite, routeHint, logger, onToken(token) { acceptToken(token) } })
+  let enrollmentTimeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    const timedOut = new Promise<never>((_, reject) => {
+      enrollmentTimeout = setTimeout(() => reject(new Error('Executor invite enrollment timed out')), 90_000)
+    })
+    const enrollment = await Promise.race([Promise.all([handle.ready, enrolledToken]).then(([, token]) => ({ token })), handle.permanentError.then((error) => ({ error })), timedOut])
+    if ('error' in enrollment) throw new Error(`Executor invite enrollment failed: ${enrollment.error.code}`)
+    delete process.env.EXECUTOR_INVITE
+    await handle.close()
+    await installWindowsService({ HOST_URL: host, EXECUTOR_PRIVILEGE_MODE: 'privileged', EXECUTOR_INSTALL_ID: `invite-${routeHint}` }, workspaceRoot, enrollment.token, workspaceId, { routeHint, installationSource: 'private-cloud-invite', reportProgress: false })
+  } finally {
+    if (enrollmentTimeout) clearTimeout(enrollmentTimeout)
+    delete process.env.EXECUTOR_INVITE
+    await handle.close().catch(() => undefined)
+  }
+}
+
+async function installWindowsService(env: Pick<ReturnType<typeof bootstrapEnvironment>, 'HOST_URL' | 'EXECUTOR_PRIVILEGE_MODE'> & Partial<Pick<ReturnType<typeof bootstrapEnvironment>, 'EXECUTOR_INSTALL_LABEL' | 'EXECUTOR_INSTALL_ID'>>, workspaceRoot: string, token: string, workspaceId: string, options: { routeHint?: string; installationSource?: 'dashboard-native' | 'private-cloud-invite'; reportProgress?: boolean } = {}): Promise<void> {
   const serviceName = 'KalaExecutor'
   const plan = createWindowsServicePlan({
     serviceName, displayName: 'Kala Executor',
@@ -331,7 +369,7 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
     version: 1, host: env.HOST_URL, ...(env.EXECUTOR_INSTALL_LABEL ? { name: env.EXECUTOR_INSTALL_LABEL } : {}),
     privilegeMode: env.EXECUTOR_PRIVILEGE_MODE,
     sandboxRoots: [workspaceRoot], credentialFile: credentialPath, installationId: env.EXECUTOR_INSTALL_ID,
-    workspaceId, installationSource: 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
+    workspaceId, ...(options.routeHint ? { routeHint: options.routeHint } : {}), installationSource: options.installationSource ?? 'dashboard-native', managedRoot: plan.layout.dataDir, serviceMode: 'system',
   }
   try {
     await secureWindowsServiceDataDir(plan.layout.dataDir)
@@ -341,8 +379,8 @@ async function installWindowsService(env: ReturnType<typeof bootstrapEnvironment
     writePrivateAtomic(plan.layout.serviceConfigPath, renderWindowsServiceConfig(plan.layout, serviceName, 'Kala Executor'))
     writePrivateAtomic(credentialPath, `${token}\n`)
     writePrivateAtomic(plan.layout.configPath, `${JSON.stringify(config, null, 2)}\n`)
-    await reportInstallation(env, 'service_installing')
-    await reportInstallation(env, 'starting')
+    if (options.reportProgress !== false) await reportInstallation(env as ReturnType<typeof bootstrapEnvironment>, 'service_installing')
+    if (options.reportProgress !== false) await reportInstallation(env as ReturnType<typeof bootstrapEnvironment>, 'starting')
     await executeWindowsServicePlan(plan, ['create', 'recovery', 'start'])
     process.stdout.write('[4/4] Windows service started and connected.\n')
     process.stdout.write(`  Status ${JSON.stringify(plan.layout.executablePath)} service status\n`)
@@ -388,6 +426,12 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   const internalIndex = argv.findIndex((arg) => arg === '--internal-installer')
   if (internalIndex >= 0) {
     await runInternalInstaller()
+    return
+  }
+  const inviteInstallerIndex = argv.findIndex((arg) => arg === '--invite-installer')
+  if (inviteInstallerIndex >= 0) {
+    if (argv.length !== 1) throw new Error('--invite-installer does not accept command-line credentials or options')
+    await runInviteInstaller()
     return
   }
   const args = parseArgs(argv)
@@ -438,7 +482,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
   const invite = args.invite ?? (managedCredential?.startsWith('ak_invite_') ? managedCredential : undefined) ?? process.env.EXECUTOR_INVITE
   const profile = normalizeExecutorProfile(args.profile ?? managed?.profile ?? process.env.KALA_EXECUTOR_PROFILE)
   const token = args.token ?? (managedCredential?.startsWith('ak_exec_') ? managedCredential : undefined) ?? process.env.EXECUTOR_TOKEN ?? loadExecutorToken(undefined, profile)
-  const routeHint = invite ? hashExecutorInviteRoute(invite) : token ? loadExecutorRouteHint(profile) : undefined
+  const routeHint = invite ? hashExecutorInviteRoute(invite) : managed?.routeHint ?? (token ? loadExecutorRouteHint(profile) : undefined)
   // Previously enrolled Executors already have a device token, so Host does not issue
   // another welcome. Preserve their invite's routing hint before the first reconnect.
   if (invite && token) saveExecutorRouteHint(invite, profile)
