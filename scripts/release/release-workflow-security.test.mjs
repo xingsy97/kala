@@ -48,7 +48,12 @@ test('Private Cloud runtime image receives an exact-tag sealed Windows Executor 
   for (const asset of ['kala-executor-win32-x64.exe', 'kala-executor-service-host-win32-x64.exe', 'node-pty-win32-x64.tar.gz']) {
     assert.match(dockerfile, new RegExp(`cp /tmp/windows-assets/${asset.replaceAll('.', '\\.')} release/`, 'u'))
   }
-  assert.match(dockerfile, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--finalize-only[\s\S]*pnpm run verify:release-assets/u)
+  assert.match(dockerfile, /chmod \+x release\/kala-executor-win32-x64\.exe release\/kala-executor-service-host-win32-x64\.exe/u)
+  assert.match(dockerfile, /embed-windows-assets-in-portable-host\.mjs[\s\S]*--finalize-only[\s\S]*pnpm run verify:release-assets -- --private-cloud-runtime/u)
+  const verifier = readFileSync(join(import.meta.dirname, 'verify-release-assets.mjs'), 'utf8')
+  assert.match(verifier, /privateCloudRuntime = process\.argv\.includes\('--private-cloud-runtime'\)/u)
+  assert.match(verifier, /JSON\.stringify\(actualNativeTargets\) !== JSON\.stringify\(\['win32-x64'\]\)/u)
+  assert.match(verifier, /'manifest.nativeTargets must be empty for a CJS-only stage or contain exactly the four supported Executor targets'/u)
   assert.match(dockerfile, /COPY --from=build --chown=65532:65532 \/app\/release\/ \/app\/release\//u)
 })
 
@@ -205,7 +210,7 @@ test('RC promotion binds acceptance to the tag ref exposed by the Actions API', 
   assert.doesNotMatch(workflow, /Windows release asset is not allowed/u)
   assert.match(workflow, /fresh_beta_candidate_acceptance|Fresh beta candidate install and restore \(exact signed draft release\)/u)
   assert.match(workflow, /portable-image-release\.yml\/runs[\s\S]*isolated-vm-acceptance/u)
-  assert.match(workflow, /verify-private-cloud-fresh-evidence\.mjs[\s\S]*verify-portable-public\.mjs[\s\S]*gh release edit "\$TAG" --draft=false/u)
+  assert.match(workflow, /verify-private-cloud-fresh-evidence\.mjs[\s\S]*verify-portable-public\.mjs[\s\S]*if \[\[ "\$TAG" == \*-\* \]\]; then[\s\S]*gh release edit "\$TAG" --draft=false --prerelease[\s\S]*else[\s\S]*gh release edit "\$TAG" --draft=false/u)
   assert.match(workflow, /metadata\.sigstore\.json[\s\S]*portable-image-release\.yml@refs\/tags\/\$TAG/u)
   assert.match(workflow, /portable-isolated-vm-acceptance-\$PORTABLE_RUN_ID-\$PORTABLE_RUN_ATTEMPT/u)
   const portableWorkflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/portable-image-release.yml'), 'utf8')

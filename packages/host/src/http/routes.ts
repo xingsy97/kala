@@ -2447,23 +2447,25 @@ async function serveReleaseAsset(
     res.writeHead(403).end()
     return
   }
+  let fileSize: number
   try {
     const st = await stat(abs)
     if (!st.isFile()) {
       serveEmbeddedReleaseAsset(embeddedAssets, requested, req, res)
       return
     }
+    fileSize = st.size
   } catch {
     serveEmbeddedReleaseAsset(embeddedAssets, requested, req, res)
     return
   }
   const mime = MIME[extname(abs).toLowerCase()] ?? 'application/octet-stream'
-  res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-cache, must-revalidate' })
+  res.writeHead(200, { 'content-type': mime, 'content-length': String(fileSize), 'cache-control': 'no-cache, must-revalidate' })
   if (req.method === 'HEAD') {
     res.end()
     return
   }
-  createReadStream(abs).pipe(res)
+  createReadStream(abs).on('error', () => res.destroy()).pipe(res)
 }
 
 function serveEmbeddedReleaseAsset(

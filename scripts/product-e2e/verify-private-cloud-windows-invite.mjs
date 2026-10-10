@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 
 import { io } from 'socket.io-client'
 import { PROTOCOL_VERSION } from '../../packages/shared/dist/index.js'
+import { hashToken } from '../../packages/host/dist/src/store/executor-identity.js'
 import { startRuntimeIngressGateway } from '../../packages/runtime-ingress-gateway/dist/src/edge/server.js'
 import { FileBrowserSessionStore } from '../../packages/runtime-ingress-gateway/dist/src/auth/browser-session-store.js'
 import { createSessionSecretBox } from '../../packages/runtime-ingress-gateway/dist/src/auth/session-secret-box.js'
@@ -110,7 +111,15 @@ try {
         headers: { 'content-type': 'application/json', 'x-agent-runlab-ingress-secret': ingressSecret },
         body: JSON.stringify({ unitId, operationId: `provision:${unitId}`, generation: 1 }),
       })
-      if (!response.ok) throw new Error(`Private Cloud runtime unit provisioning failed (${response.status})`)
+      if (!response.ok) {
+        const body = await response.text()
+        // Only report a fixed error class, never a raw Host response or filesystem path.
+        const cause = /\b(EPERM|EISDIR|ENOENT|EACCES)\b/u.exec(body)?.[1]
+          ?? (/invalid TenantRuntimeUnit id/u.test(body) ? 'invalid_unit_id' : undefined)
+          ?? (/invalid provisioning request/u.test(body) ? 'invalid_request' : undefined)
+          ?? 'other'
+        throw new Error(`Private Cloud runtime unit provisioning failed (${response.status}, ${cause})`)
+      }
     },
   })
 
@@ -308,7 +317,7 @@ async function waitForInviteState(unitId, inviteId, child) {
 
 function assertDeviceCredential(state, workspaceId, credential) {
   if (!/^ak_exec_[A-Za-z0-9_-]+$/u.test(credential)) throw new Error('Executor did not replace the invite with a device token')
-  const expectedHash = createHash('sha256').update(credential).digest('hex')
+  const expectedHash = hashToken(credential)
   const identity = state.state.executors.find((entry) => entry.workspaceId === workspaceId && !entry.revokedAt)
   if (!identity || identity.tokenHash !== expectedHash) throw new Error('persisted device token is not active for the invited workspace')
 }
@@ -429,7 +438,24 @@ function run(file, args, options = {}) {
   })
 }
 
-function summarizeResult(result) { return JSON.stringify({ code: result.code, stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr), accessDenied: /access denied|UnauthorizedAccessException/iu.test(`${result.stdout}\n${result.stderr}`), missingFile: /cannot find|not found|FileNotFoundException/iu.test(`${result.stdout}\n${result.stderr}`) }) }
+function summarizeResult(result) {
+  const output = `${result.stdout}\n${result.stderr}`
+  return JSON.stringify({
+    code: result.code, stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr),
+    downloadStarted: /Downloading verified Windows Executor assets/u.test(output),
+    assetsVerified: /Windows ConPTY archive verified/u.test(output),
+    nativeLaunchStarted: /Starting verified Windows Executor/u.test(output),
+    inviteEnrollmentStarted: /Starting Private Cloud invite enrollment/u.test(output),
+    inviteEnrolled: /Private Cloud invited device enrolled/u.test(output),
+    serviceInstallStarted: /Installing Private Cloud Windows service/u.test(output),
+    serviceStarted: /Windows service started and connected/u.test(output),
+    elevationRejected: /requires an elevated Administrator/iu.test(output),
+    existingInstallation: /Refusing to replace an existing Windows Executor installation/iu.test(output),
+    enrollmentFailed: /Executor invite enrollment failed|Executor invite enrollment timed out/iu.test(output),
+    accessDenied: /access denied|UnauthorizedAccessException/iu.test(output),
+    missingFile: /cannot find|not found|FileNotFoundException/iu.test(output),
+  })
+}
 function summarizeDiagnostics() { return diagnostics.map(({ label, stdoutBytes, stderrBytes, signals }) => ({ label, stdoutBytes, stderrBytes, signals: [...signals] })) }
 function assertFiles(paths, label) { const missing = paths.filter((path) => !existsSync(path) || statSync(path).size === 0); if (missing.length) throw new Error(`${label} is incomplete (${missing.length} missing files)`) }
 function once(socket, event, timeoutMs) { return new Promise((resolvePromise, reject) => { const timer = setTimeout(() => reject(new Error(`${event} timed out`)), timeoutMs); socket.once(event, (value) => { clearTimeout(timer); resolvePromise(value) }); socket.once('connect_error', () => { clearTimeout(timer); reject(new Error(`${event} failed before connection`)) }) }) }

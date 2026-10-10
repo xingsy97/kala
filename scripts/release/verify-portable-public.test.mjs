@@ -17,28 +17,28 @@ const acceptance = {
 }
 const request = (fetchImpl, overrides = {}) => verifyPortablePublic({ metadata, acceptance, tag, revision, repository: 'xingsy97/kala', fetchImpl, ...overrides })
 
-test('only an anonymous public package with the accepted immutable digest may pass', async () => {
+test('only an anonymously retrievable immutable digest may pass without Packages API access', async () => {
   const urls = []
   const result = await request(async (url, options) => {
     urls.push({ url, options })
-    if (url.includes('api.github.com')) return { status: 200, json: async () => ({ name: 'kala-portable', visibility: 'public' }) }
+    assert.ok(!url.includes('api.github.com'))
     if (url.includes('/token?')) return { status: 200, json: async () => ({ token: 'anonymous-test' }) }
     return { status: 200, headers: { get: () => digest } }
   })
   assert.equal(result.anonymousDigest, digest)
-  assert.equal(urls.length, 3)
-  assert.deepEqual(urls[0].options.headers, { accept: 'application/vnd.github+json' })
-  assert.equal(urls[2].options.method, 'HEAD')
-  assert.equal(urls[2].url, `https://ghcr.io/v2/xingsy97/kala-portable/manifests/${digest}`)
+  assert.equal(urls.length, 2)
+  assert.equal(urls[1].options.method, 'HEAD')
+  assert.equal(urls[1].url, `https://ghcr.io/v2/xingsy97/kala-portable/manifests/${digest}`)
 })
 
 test('a private package, stale digest, or mismatched VM evidence fails closed', async () => {
-  await assert.rejects(request(async () => ({ status: 404 })), /not anonymously visible/u)
+  await assert.rejects(request(async () => ({ status: 403 })), /refused an anonymous pull token/u)
   await assert.rejects(request(async (url) => url.includes('/token?')
     ? { status: 200, json: async () => ({ token: 'anonymous-test' }) }
-    : url.includes('api.github.com')
-      ? { status: 200, json: async () => ({ name: 'kala-portable', visibility: 'public' }) }
-      : { status: 200, headers: { get: () => 'sha256:' + 'c'.repeat(64) } }), /not anonymously retrievable/u)
+    : { status: 401, headers: { get: () => null } }), /not anonymously retrievable/u)
+  await assert.rejects(request(async (url) => url.includes('/token?')
+    ? { status: 200, json: async () => ({ token: 'anonymous-test' }) }
+    : { status: 200, headers: { get: () => 'sha256:' + 'c'.repeat(64) } }), /not anonymously retrievable/u)
   await assert.rejects(request(async () => { throw new Error('network must not run') }, {
     acceptance: { ...acceptance, revision: 'd'.repeat(40) },
   }), /Expected values to be strictly equal/u)

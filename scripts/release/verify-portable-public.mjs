@@ -20,14 +20,9 @@ export async function verifyPortablePublic({ metadata, acceptance, tag, revision
   assert.ok(imageMatch, 'image must be the exact immutable Portable package digest')
   verifyPortableAcceptanceEvidence(acceptance, { image: metadata.image, tag, revision })
 
-  // Both requests are anonymous. A repository GITHUB_TOKEN or docker login
-  // would silently turn a still-private GHCR image into a false public pass.
-  const packageResponse = await fetchImpl('https://api.github.com/users/xingsy97/packages/container/kala-portable', {
-    headers: { accept: 'application/vnd.github+json' }, cache: 'no-store',
-  })
-  if (packageResponse.status !== 200) throw new Error('Portable GHCR package is not anonymously visible')
-  const pkg = await packageResponse.json()
-  if (pkg.name !== 'kala-portable' || pkg.visibility !== 'public') throw new Error('Portable GHCR package visibility is not public')
+  // Query GHCR without a repository token or docker login. GitHub's Packages
+  // REST endpoint can require authentication even when the registry permits
+  // anonymous pulls; promotion separately pulls every layer with empty Docker credentials.
   const tokenResponse = await fetchImpl('https://ghcr.io/token?service=ghcr.io&scope=repository:xingsy97/kala-portable:pull', { cache: 'no-store' })
   if (tokenResponse.status !== 200) throw new Error('GHCR refused an anonymous pull token')
   const anonymousToken = (await tokenResponse.json()).token

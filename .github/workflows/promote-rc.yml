@@ -159,4 +159,8 @@ jobs:
             DOCKER_CONFIG="$anonymous_docker_config" docker image inspect "$public_image" >/dev/null
             rm -rf -- "$anonymous_docker_config"
           test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = true
-          gh release edit "$TAG" --draft=false
+          if [[ "$TAG" == *-* ]]; then
+            gh release edit "$TAG" --draft=false --prerelease
+          else
+            gh release edit "$TAG" --draft=false
+          fi

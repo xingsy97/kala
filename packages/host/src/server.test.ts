@@ -2195,6 +2195,13 @@ describe('wire protocol', () => {
       await writeFile(join(releaseDir, 'kala-executor-service-host-win32-x64.exe'), serviceHost)
       const complete = await fetch(capabilityUrl)
       await expect(complete.json()).resolves.toMatchObject({ platforms: { windows: { available: true } } })
+      const native = assets.get('kala-executor-win32-x64.exe')!
+      const nativeUrl = `http://localhost:${localServer.port}/install/assets/kala-executor-win32-x64.exe`
+      const nativeResponse = await fetch(nativeUrl)
+      expect(nativeResponse.headers.get('content-length')).toBe(String(native.byteLength))
+      expect(Buffer.from(await nativeResponse.arrayBuffer())).toEqual(native)
+      const nativeHead = await fetch(nativeUrl, { method: 'HEAD' })
+      expect(nativeHead.headers.get('content-length')).toBe(String(native.byteLength))
       const powershell = await fetch(`http://localhost:${localServer.port}/install.ps1`)
       expect(powershell.status).toBe(200)
       expect(await powershell.text()).toContain('/install/assets/install-executor.ps1')

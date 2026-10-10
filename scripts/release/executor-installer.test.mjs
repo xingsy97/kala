@@ -70,15 +70,32 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
     /kala-executor-service-host-win32-x64\.exe/,
     /SHA256SUMS\.sigstore\.json/,
     /cosign\.Source verify-blob/,
-    /Get-FileHash -Algorithm SHA256/,
+    /SHA256\]::Create\(\)/,
+    /ComputeHash\(\$stream\)/,
+    /Verifying Windows Executor checksum/,
+    /Verifying Windows ConPTY archive checksum/,
+    /Verifying Windows service-host checksum/,
+    /Checking Windows ConPTY tar inventory/,
+    /\.TrimEnd\(\[char\]13\)/,
+    /Windows ConPTY tar listed/,
+    /Windows ConPTY inventory verified/,
+    /Windows ConPTY extracted/,
+    /Checking Windows ConPTY manifest/,
+    /Hashing Windows ConPTY files/,
+    /Windows ConPTY archive verified/,
     /node-pty-companion\.json/,
     /conpty\.node/,
     /worker\/conoutSocketWorker\.js/,
     /shared\/conout\.js/,
     /manifest\.files\)\.Count -ne 7/,
     /unexpected file inventory/,
+    /Downloading verified Windows Executor assets/,
+    /Verifying Windows ConPTY companion/,
+    /Starting verified Windows Executor/,
     /--internal-installer/,
   ]) assert.match(ps1, marker)
+  assert.match(ps1, /Push-Location -LiteralPath \$work[\s\S]*?\$tar\.Source -tzf \$companion[\s\S]*?\$tar\.Source -xzf \$companion[\s\S]*?Pop-Location/u)
+  assert.doesNotMatch(ps1, /\$tar\.Source -(?:tzf|xzf) \$archive/u)
   assert.match(ps1, /Host-mediated release trust requires a valid internal installation session/)
   assert.match(ps1, /--invite-installer/)
   assert.match(ps1, /KALA_INVITE_INSTALL_MODE/)
@@ -88,7 +105,11 @@ test('generates a signed-checksum Windows x64 installer with an exact ConPTY inv
   assert.doesNotMatch(ps1, /& \$binary --internal-installer @args\s*\n/u, 'organization invite must not execute the Host installation-session entry point')
   assert.match(ps1, /Release downloads require HTTPS except for loopback URLs/)
   assert.match(ps1, /SHA256SUMS must contain exactly one valid entry/)
-  assert.match(ps1, /redirected away from the trusted Host/)
+  assert.match(ps1, /if \(\$hostRelease\) \{[\s\S]*?AllowAutoRedirect = \$false[\s\S]*?GetResponseStream\(\)[\s\S]*?CopyTo\(\$outputStream\)[\s\S]*?\} else \{[\s\S]*?-PassThru/u)
+  assert.match(ps1, /ReadWriteTimeout = 60000/u)
+  assert.match(ps1, /Fetching verified asset \$name/)
+  assert.match(ps1, /Asset download completed \$name/)
+  assert.match(ps1, /redirected away from HTTPS/)
   assert.doesNotMatch(ps1, /ALLOW_UNSIGNED|winget|kala-executor\.cjs/iu)
 })
 
