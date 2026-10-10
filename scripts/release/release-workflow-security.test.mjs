@@ -54,6 +54,8 @@ test('Private Cloud images derive a minimal Node runtime and exclude unused Open
     const dockerfile = readFileSync(join(import.meta.dirname, `../../deploy/private-cloud/images/Dockerfile.${name}`), 'utf8')
     assert.match(dockerfile, /pnpm deploy --legacy --filter @agent-kernel\/[^ ]+ --prod \/out\//u)
   }
+  const dashboard = readFileSync(join(import.meta.dirname, '../../deploy/private-cloud/images/Dockerfile.dashboard'), 'utf8')
+  assert.match(dashboard, /COPY --chown=root:root --chmod=644 deploy\/private-cloud\/images\/dashboard-server\.mjs \/app\/dashboard-server\.mjs/u, 'the non-root server must read its entrypoint even when the build context is owner-only')
 })
 
 test('Private Cloud scanner preserves failure while collecting all three image reports', () => {
@@ -69,6 +71,9 @@ test('Private Cloud scanner preserves failure while collecting all three image r
 test('Private Cloud release retains image publishing and accepts the exact signed Compose candidate', () => {
   const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/private-cloud-release.yml'), 'utf8')
   for (const image of ['runtime-image:', 'ingress-image:', 'dashboard-image:']) assert.ok(workflow.includes(image))
+  const bundle = workflow.slice(workflow.indexOf('  bundle:'), workflow.indexOf('  fresh_beta_candidate_assets:'))
+  assert.match(bundle, /setup-node@v5[\s\S]*node-version: 22[\s\S]*pnpm install --frozen-lockfile/u)
+  assert.match(bundle, /build-private-cloud-operator\.mjs --target linux-x64 --output release\/kala-private-cloud-linux-x64[\s\S]*build-private-cloud-bundle\.mjs[\s\S]*--operator release\/kala-private-cloud-linux-x64/u)
   assert.match(workflow, /gh release upload "\$TAG" "\$archive" "\$signature" --clobber/u)
   assert.match(workflow, /gh release download "\$TAG"[\s\S]*cmp "\$archive"[\s\S]*cmp "\$signature"/u)
   assert.match(workflow, /Transfer exact signed bundle[\s\S]*actions\/upload-artifact@v5[\s\S]*private-cloud-acceptance-input-/u)
@@ -77,7 +82,9 @@ test('Private Cloud release retains image publishing and accepts the exact signe
   assert.match(staging, /private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.doesNotMatch(staging, /PRIVATE_CLOUD_TEST_ALICE_PASSWORD/u)
   const fresh = workflow.slice(workflow.indexOf('  fresh_beta_candidate_acceptance:'), workflow.indexOf('  clean-compose-acceptance:'))
-  assert.match(fresh, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.18'/u)
+  assert.match(staging, /if: startsWith\(github\.ref, 'refs\/tags\/'\)/u)
+  assert.match(fresh, /if: startsWith\(github\.ref, 'refs\/tags\/'\)/u)
+  assert.doesNotMatch(staging + fresh, /v0\.3\.0-beta\.18/u, 'fresh install must apply to future release tags')
   assert.doesNotMatch(fresh, /KALA_PRIVATE_CLOUD_RUNNER_ENABLED/u)
   assert.match(fresh, /runs-on: ubuntu-24\.04/u)
   assert.match(fresh, /RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}[\s\S]*test "\$RUNNER_ENVIRONMENT" = github-hosted/u)
@@ -94,8 +101,9 @@ test('Private Cloud release retains image publishing and accepts the exact signe
 
   const acceptance = workflow.slice(workflow.indexOf('  clean-compose-acceptance:'))
   assert.match(acceptance, /needs: \[resolve, bundle, fresh_beta_candidate_acceptance, fresh_beta_candidate_assets\]/u)
-  assert.match(acceptance, /if: needs\.resolve\.outputs\.tag == 'v0\.3\.0-beta\.18'[\s\S]*private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
-  assert.match(acceptance, /needs\.fresh_beta_candidate_acceptance\.result == 'success'/u)
+  assert.match(acceptance, /if: always\(\)[^\n]*needs\.fresh_beta_candidate_acceptance\.result == 'success'/u)
+  assert.doesNotMatch(acceptance, /v0\.3\.0-beta\.18|needs\.resolve\.outputs\.tag !=/u, 'optional upgrade cannot bypass fresh acceptance on later tags')
+  assert.match(acceptance, /private-cloud-beta-draft-assets-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/u)
   assert.match(acceptance, /runs-on: ubuntu-24\.04/u)
   assert.match(acceptance, /vars\.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true'/u)
   assert.match(acceptance, /RUNNER_ENVIRONMENT: \$\{\{ runner\.environment \}\}[\s\S]*test "\$RUNNER_ENVIRONMENT" = github-hosted/u)
@@ -127,6 +135,9 @@ test('release workflow publishes archived metadata and verifies the signed Execu
 
 test('RC promotion binds acceptance to the tag ref exposed by the Actions API', () => {
   const workflow = readFileSync(join(import.meta.dirname, '../../.github/workflows/promote-rc.yml'), 'utf8')
+  assert.doesNotMatch(workflow, /v0\.3\.0-beta\.18/u, 'fresh Private Cloud and OCI evidence must be verified for later tags too')
+  assert.match(workflow, /Fresh beta candidate install and restore \(exact signed draft release\)[\s\S]*FRESH_RUN_ID/u)
+  assert.match(workflow, /verify-private-cloud-fresh-evidence\.mjs[\s\S]*--archive "\$archive" --tag "\$TAG" --revision "\$REVISION"/u)
   assert.match(workflow, /--jq \.head_branch\)" = "\$TAG"/u)
   assert.doesNotMatch(workflow, /--jq \.inputs\.tag/u)
   assert.match(workflow, /verify-rc-evidence\.mjs[\s\S]*--tag "\$TAG" --revision/u)

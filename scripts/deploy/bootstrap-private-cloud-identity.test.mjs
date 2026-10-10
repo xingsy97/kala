@@ -9,6 +9,13 @@ const IMAGE = `alpine@sha256:${'a'.repeat(64)}`
 const PAT = 'test-bootstrap-pat-never-log'
 const CLIENT_SECRET = 'test-client-secret-never-log'
 
+test('native Operator runs bundled identity enrollment in-process without a host Node executable', async () => {
+  const source = await readFile(join(import.meta.dirname, 'kala-private-cloud.mjs'), 'utf8')
+  assert.match(source, /import \{ bootstrapPrivateCloudIdentity \} from '\.\/bootstrap-private-cloud-identity\.mjs'/u)
+  assert.match(source, /await bootstrapPrivateCloudIdentity\(\{ configDir, bootstrapVolume: volume, identityImage: image \}\)/u)
+  assert.doesNotMatch(source, /captureSync\(process\.execPath, \[join\(release\.dir, 'bootstrap-private-cloud-identity\.mjs'/u)
+})
+
 async function fixture(t, environment = {}) {
   const configDir = await mkdtemp(join(tmpdir(), 'kala-identity-bootstrap-'))
   const secretsDir = join(configDir, 'secrets')

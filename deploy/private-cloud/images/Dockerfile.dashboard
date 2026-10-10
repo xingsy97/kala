@@ -50,6 +50,6 @@ FROM node-runtime AS runtime
 ENV NODE_ENV=production DASHBOARD_PORT=8080 DASHBOARD_ROOT=/app/dashboard
 WORKDIR /app
 COPY --from=build --chown=root:root /app/packages/dashboard/dist /app/dashboard
-COPY --chown=root:root deploy/private-cloud/images/dashboard-server.mjs /app/dashboard-server.mjs
+COPY --chown=root:root --chmod=644 deploy/private-cloud/images/dashboard-server.mjs /app/dashboard-server.mjs
 USER 65532:65532
 CMD ["/app/dashboard-server.mjs"]

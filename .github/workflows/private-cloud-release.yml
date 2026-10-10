@@ -12,7 +12,7 @@ on:
         description: Previously released Private Cloud version for clean upgrade and rollback acceptance
         required: false
       native_operator:
-        description: Build an optional native Operator artifact for manual qualification, outside the default signed bundle
+        description: Build an additional native Operator artifact for manual qualification; signed bundles already include it
         required: false
         type: boolean
         default: false
@@ -229,13 +229,18 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v5
-      - name: Build immutable Compose bundle
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, package-manager-cache: false }
+      - run: corepack enable && corepack prepare pnpm@11.3.0 --activate && pnpm install --frozen-lockfile
+      - name: Build immutable Compose bundle with native Operator
         run: |
+          node scripts/release/build-private-cloud-operator.mjs --target linux-x64 --output release/kala-private-cloud-linux-x64
           node scripts/release/build-private-cloud-bundle.mjs \
             --runtime-image "ghcr.io/${{ github.repository }}-private-cloud-runtime@${{ needs.runtime-image.outputs.digest }}" \
             --ingress-image "ghcr.io/${{ github.repository }}-private-cloud-ingress@${{ needs.ingress-image.outputs.digest }}" \
             --dashboard-image "ghcr.io/${{ github.repository }}-private-cloud-dashboard@${{ needs.dashboard-image.outputs.digest }}" \
             --revision "${{ github.sha }}" \
+            --operator release/kala-private-cloud-linux-x64 \
             --archive "release/kala-private-cloud-${{ needs.resolve.outputs.version }}-${{ matrix.target }}.tar.gz"
           node scripts/release/verify-private-cloud-bundle.mjs release/private-cloud
       - uses: sigstore/cosign-installer@v3
@@ -270,9 +275,9 @@ jobs:
           cmp "$signature" "$published/$(basename "$signature")"
 
   fresh_beta_candidate_assets:
-    name: Stage exact signed beta draft assets on hosted runner
+    name: Stage exact signed draft assets on hosted runner
     needs: [resolve, bundle]
-    if: needs.resolve.outputs.tag == 'v0.3.0-beta.18'
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -325,7 +330,7 @@ jobs:
   fresh_beta_candidate_acceptance:
     name: Fresh beta candidate install and restore (exact signed draft release)
     needs: [resolve, bundle, fresh_beta_candidate_assets]
-    if: needs.resolve.outputs.tag == 'v0.3.0-beta.18'
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -350,10 +355,9 @@ jobs:
           browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$browser" && test -x "$browser"
           echo "CHROME_PATH=$browser" >> "$GITHUB_ENV"
-      - name: Require the exact beta tag and clean acceptance prerequisites
+      - name: Require the exact release tag and clean acceptance prerequisites
         run: |
           set -euo pipefail
-          test "$TAG" = v0.3.0-beta.18
           test "$GITHUB_REF" = "refs/tags/$TAG"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -x "${CHROME_PATH:-/snap/bin/chromium}"
@@ -427,7 +431,7 @@ jobs:
   clean-compose-acceptance:
     name: Clean Compose install, isolation, upgrade and restore (exact signed release)
     needs: [resolve, bundle, fresh_beta_candidate_acceptance, fresh_beta_candidate_assets]
-    if: always() && needs.resolve.result == 'success' && needs.bundle.result == 'success' && (needs.resolve.outputs.tag != 'v0.3.0-beta.18' || needs.fresh_beta_candidate_acceptance.result == 'success') && vars.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/')
+    if: always() && needs.resolve.result == 'success' && needs.bundle.result == 'success' && needs.fresh_beta_candidate_acceptance.result == 'success' && vars.KALA_PRIVATE_CLOUD_UPGRADE_ACCEPTANCE_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -465,7 +469,6 @@ jobs:
           name: private-cloud-acceptance-input-${{ github.run_id }}-linux-x64
           path: candidate
       - uses: actions/download-artifact@v5
-        if: needs.resolve.outputs.tag == 'v0.3.0-beta.18'
         with:
           name: private-cloud-beta-draft-assets-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: sigstore/cosign-installer@v3
@@ -516,16 +519,6 @@ jobs:
       - name: Verify the exact signed release Executor binary
         run: |
           set -euo pipefail
-          if [[ "$TAG" != v0.3.0-beta.18 ]]; then
-            for attempt in $(seq 1 40); do
-              gh release download "$TAG" -p kala-executor-linux-x64 -D executor && test -s executor/kala-executor-linux-x64 && break
-              sleep 15
-            done
-            for attempt in $(seq 1 40); do
-              gh release download "$TAG" -p SHA256SUMS -p SHA256SUMS.sigstore.json -D executor && test -s executor/SHA256SUMS && test -s executor/SHA256SUMS.sigstore.json && break
-              sleep 15
-            done
-          fi
           test -s executor/kala-executor-linux-x64 && test -s executor/SHA256SUMS && test -s executor/SHA256SUMS.sigstore.json || { echo 'Signed release Executor is unavailable' >&2; exit 1; }
           cosign verify-blob --bundle executor/SHA256SUMS.sigstore.json \
             --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \

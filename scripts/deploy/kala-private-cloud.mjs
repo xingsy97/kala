@@ -8,6 +8,7 @@ import { request as httpRequest } from 'node:http'
 import { createServer, isIP } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { getCACertificates } from 'node:tls'
+import { bootstrapPrivateCloudIdentity } from './bootstrap-private-cloud-identity.mjs'
 
 const argv = process.argv.slice(2); if (argv[0] === '--') argv.shift()
 const command = argv[0]
@@ -512,7 +513,7 @@ async function install() {
       const volume = config.volumes?.['identity-zitadel-bootstrap']?.name ?? `${projectName(configDir)}_identity-zitadel-bootstrap`
       const image = config.services?.['identity-init']?.image
       if (!/^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$/u.test(image ?? '')) throw new Error('bundled bootstrap image is not immutable')
-      captureSync(process.execPath, [join(release.dir, 'bootstrap-private-cloud-identity.mjs'), '--config-dir', configDir, '--bootstrap-volume', volume, '--identity-image', image], release.dir, invocation.env)
+      await bootstrapPrivateCloudIdentity({ configDir, bootstrapVolume: volume, identityImage: image })
       validateConfig(configDir, { requireClient: true })
     }
     compose(release, configDir, ['up', '-d', '--wait', '--remove-orphans'])

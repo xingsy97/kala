@@ -116,12 +116,14 @@ on a new GitHub-hosted `ubuntu-24.04` VM; no self-hosted runner or persistent
 installation is needed. They check Docker, the browser and the VM environment
 before running the actual signed-asset, browser, Executor and restore tests.
 
-The `v0.3.0-beta.18` fresh job is self-contained and requires no repository
-Actions secrets or variables. Its explicit `--ephemeral-bundled-acceptance`
-path uses the verified candidate Operator to run `init-config` with bundled
-identity and local-volume storage. It starts only the signed candidate identity
-stack, uses the short-lived bootstrap PAT inside the signed identity helper to
-create two real verified password users, records each returned Zitadel `userId`
+The fresh candidate job runs for every release tag and is self-contained; it
+requires no repository Actions secrets or variables. Its success and digest-bound
+evidence are required for promotion even when the predecessor-upgrade job is
+disabled. Its explicit `--ephemeral-bundled-acceptance` path uses the verified
+candidate Operator to run `init-config` with bundled identity and local-volume
+storage. It starts only the signed candidate identity stack, uses the
+short-lived bootstrap PAT inside the signed identity helper to create two real
+verified password users, records each returned Zitadel `userId`
 as that user's exact OIDC `sub`, enrolls the web client, and deletes the PAT.
 The identity services are stopped without deleting their volumes; normal
 candidate installation then reuses the same identity database and enrollment

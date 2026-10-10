@@ -402,11 +402,13 @@ function isMainModule() {
 }
 
 if (isMainModule()) {
-  try {
-    const result = await bootstrapPrivateCloudIdentity(parseCliArgs(process.argv.slice(2)))
-    process.stdout.write(`${JSON.stringify(result)}\n`)
-  } catch (error) {
-    process.stderr.write(`Identity bootstrap failed: ${error instanceof Error ? error.message : 'unknown error'}\n`)
-    process.exitCode = 1
-  }
+  void (async () => {
+    try {
+      const result = await bootstrapPrivateCloudIdentity(parseCliArgs(process.argv.slice(2)))
+      process.stdout.write(`${JSON.stringify(result)}\n`)
+    } catch (error) {
+      process.stderr.write(`Identity bootstrap failed: ${error instanceof Error ? error.message : 'unknown error'}\n`)
+      process.exitCode = 1
+    }
+  })()
 }
